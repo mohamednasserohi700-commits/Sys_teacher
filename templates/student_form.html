@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block title %}{% if action=='add' %}إضافة طالب{% else %}تعديل بيانات الطالب{% endif %}{% endblock %}
+{% block extra_head %}
+<style>
+.days-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 10px;
+  margin-top: 8px;
+}
+.day-checkbox { display: none; }
+.day-label {
+  display: flex;align-items: center;justify-content: center;gap: 6px;
+  padding: 10px 8px;border-radius: 8px;border: 2px solid var(--fiori-border);
+  background: var(--fiori-bg);cursor: pointer;font-size: 13px;font-weight: 500;
+  color: var(--fiori-text-secondary);transition: all .15s;user-select: none;
+}
+.day-label:hover { border-color: var(--fiori-blue);color: var(--fiori-blue);background: var(--fiori-blue-light); }
+.day-checkbox:checked + .day-label {
+  border-color: var(--fiori-blue);background: var(--fiori-blue);color: #fff;font-weight: 600;
+}
+.days-section {
+  background: var(--fiori-blue-light);border: 1px solid rgba(0,112,242,.15);
+  border-radius: 10px;padding: 16px;margin-top: 4px;
+}
+.section-divider {
+  border: none;border-top: 1px dashed var(--fiori-border);margin: 20px 0;
+}
+.section-title {
+  font-size: 13px;font-weight: 700;color: var(--fiori-blue);
+  margin-bottom: 12px;display: flex;align-items: center;gap: 6px;
+}
+</style>
+{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <div>
+    <div class="page-title">{% if action=='add' %}تسجيل طالب جديد{% else %}تعديل: {{ student.name }}{% endif %}</div>
+    <div class="page-subtitle">{% if action=='add' %}أدخل بيانات الطالب وحدد أيام حضوره{% else %}تعديل البيانات الأساسية وأيام الحضور{% endif %}</div>
+  </div>
+  <a href="/students" class="btn btn-secondary">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+    رجوع
+  </a>
+</div>
+
+<div class="card" style="max-width:720px">
+  <div class="card-header"><span class="card-title">بيانات الطالب</span></div>
+  <div class="card-body">
+    <form method="POST">
+
+      <!-- ── البيانات الأساسية ── -->
+      <div class="section-title">👤 البيانات الأساسية</div>
+      <div class="form-row cols-2">
+        <div class="form-group">
+          <label class="form-label">اسم الطالب <span class="required">*</span></label>
+          <input class="form-control" type="text" name="name" required
+            value="{{ student.name if student else '' }}" placeholder="الاسم الكامل">
+        </div>
+        <div class="form-group">
+          <label class="form-label">رقم هاتف الطالب</label>
+          <input class="form-control" type="tel" name="student_phone"
+            value="{{ student.student_phone if student and student.student_phone else '' }}" placeholder="05xxxxxxxx">
+        </div>
+      </div>
+
+      <!-- الصف والفصل -->
+      <div class="form-row cols-2">
+        <div class="form-group">
+          <label class="form-label">الصف الدراسي <span class="required">*</span></label>
+          <select class="form-control" name="grade" required>
+            <option value="">-- اختر الصف --</option>
+            <optgroup label="المرحلة الابتدائية">
+              {% for g in [
+                'الصف الأول الابتدائي','الصف الثاني الابتدائي','الصف الثالث الابتدائي',
+                'الصف الرابع الابتدائي','الصف الخامس الابتدائي','الصف السادس الابتدائي'
+              ] %}
+              <option value="{{ g }}" {% if student and student.grade==g %}selected{% endif %}>{{ g }}</option>
+              {% endfor %}
+            </optgroup>
+            <optgroup label="المرحلة المتوسطة">
+              {% for g in [
+                'الصف الأول المتوسط','الصف الثاني المتوسط','الصف الثالث المتوسط'
+              ] %}
+              <option value="{{ g }}" {% if student and student.grade==g %}selected{% endif %}>{{ g }}</option>
+              {% endfor %}
+            </optgroup>
+            <optgroup label="المرحلة الثانوية">
+              {% for g in [
+                'الصف الأول الثانوي','الصف الثاني الثانوي','الصف الثالث الثانوي'
+              ] %}
+              <option value="{{ g }}" {% if student and student.grade==g %}selected{% endif %}>{{ g }}</option>
+              {% endfor %}
+            </optgroup>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">الفصل الدراسي <span class="required">*</span></label>
+          <select class="form-control" name="semester" required>
+            {% set cur_sem = student.semester if student and student.semester else 'الأول' %}
+            <option value="الأول" {% if cur_sem=='الأول' %}selected{% endif %}>الفصل الأول</option>
+            <option value="الثاني" {% if cur_sem=='الثاني' %}selected{% endif %}>الفصل الثاني</option>
+            <option value="الصيفي" {% if cur_sem=='الصيفي' %}selected{% endif %}>الترم الصيفي</option>
+          </select>
+        </div>
+      </div>
+
+      <hr class="section-divider">
+
+      <!-- ── بيانات ولي الأمر ── -->
+      <div class="section-title">👨‍👦 بيانات ولي الأمر</div>
+      <div class="form-row cols-2">
+        <div class="form-group">
+          <label class="form-label">اسم ولي الأمر</label>
+          <input class="form-control" type="text" name="parent_name"
+            value="{{ student.parent_name if student else '' }}" placeholder="اسم الأب أو الأم">
+        </div>
+        <div class="form-group">
+          <label class="form-label">رقم جوال ولي الأمر</label>
+          <input class="form-control" type="tel" name="parent_phone"
+            value="{{ student.parent_phone if student else '' }}" placeholder="05xxxxxxxx">
+        </div>
+      </div>
+
+      <hr class="section-divider">
+
+      <!-- ── أيام الحضور ── -->
+      <div class="form-group">
+        <label class="form-label">
+          📅 أيام الحضور الأسبوعية
+          <span style="font-size:11px;color:var(--fiori-text-secondary);font-weight:400;margin-right:6px">(اختر الأيام التي يحضر فيها الطالب)</span>
+        </label>
+        <div class="days-section">
+          <div class="days-grid">
+            {% set selected_days = student.get_attendance_days() if student else [] %}
+            {% set day_icons = {'السبت':'🟦','الأحد':'🟩','الاثنين':'🟨','الثلاثاء':'🟧','الأربعاء':'🟪','الخميس':'🟫','الجمعة':'🟥'} %}
+            {% for day in all_days %}
+            <div>
+              <input type="checkbox" class="day-checkbox" name="attendance_days"
+                id="day_{{ loop.index }}" value="{{ day }}"
+                {% if day in selected_days %}checked{% endif %}>
+              <label class="day-label" for="day_{{ loop.index }}">
+                <span>{{ day_icons.get(day,'📅') }}</span> {{ day }}
+              </label>
+            </div>
+            {% endfor %}
+          </div>
+          <div style="font-size:12px;color:var(--fiori-text-secondary);margin-top:8px">
+            💡 إذا لم تختر أي يوم، سيظهر الطالب في جميع أيام الحضور
+          </div>
+          <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="selectWeekdays()">أيام الأسبوع (س-خ)</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="selectAll()">تحديد الكل</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="clearAll()">إلغاء الكل</button>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:12px;margin-top:20px;flex-wrap:wrap">
+        <button type="submit" class="btn btn-primary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          {% if action=='add' %}تسجيل الطالب{% else %}حفظ التعديلات{% endif %}
+        </button>
+        <a href="/students" class="btn btn-secondary">إلغاء</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const weekdays = ['السبت','الأحد','الاثنين','الثلاثاء','الأربعاء'];
+function selectWeekdays() {
+  document.querySelectorAll('input[name="attendance_days"]').forEach(cb => {
+    cb.checked = weekdays.includes(cb.value);
+  });
+}
+function selectAll() {
+  document.querySelectorAll('input[name="attendance_days"]').forEach(cb => { cb.checked = true; });
+}
+function clearAll() {
+  document.querySelectorAll('input[name="attendance_days"]').forEach(cb => { cb.checked = false; });
+}
+</script>
+{% endblock %}
