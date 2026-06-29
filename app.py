@@ -406,9 +406,9 @@ def send_whatsapp(student_id):
 
     phone = student.parent_phone.replace(' ', '').replace('-', '').replace('+', '')
     if phone.startswith('0'):
-        phone = '966' + phone[1:]
-    if not phone.startswith('966'):
-        phone = '966' + phone
+        phone = '20' + phone[1:]
+    if not phone.startswith('20'):
+        phone = '20' + phone
 
     wa_url = f"https://wa.me/{phone}?text={urllib.parse.quote(msg)}"
     return redirect(wa_url)
