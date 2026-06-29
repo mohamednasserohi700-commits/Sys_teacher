@@ -1,430 +1,193 @@
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash, send_file, Response
+"""
+نظام إدارة الطلاب — Multi-Tenant
+كل مؤسسة لها ملف SQLite منفصل في مجلد /data/tenants/
+قاعدة بيانات المؤسسات (tenants) في /data/main.db
+"""
+
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash, send_file, g
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import scoped_session, sessionmaker, declarative_base
 from datetime import datetime, date
-import json
-import urllib.parse
-import os
-import io
-import zipfile
+from functools import wraps
+import json, urllib.parse, os, io, zipfile, re
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'school_secret_2024_change_in_prod')
+app.secret_key = os.environ.get('SECRET_KEY', 'multitenant_secret_2024_change_in_prod')
 
-# Database: use PostgreSQL on Railway if DATABASE_URL is set, else SQLite locally
-DATABASE_URL = os.environ.get('DATABASE_URL', '')
-if DATABASE_URL.startswith('postgres://'):
-    DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
-app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL if DATABASE_URL else 'sqlite:///school.db'
+@app.template_filter('format_date')
+def format_date_filter(value, fmt='%Y/%m/%d'):
+    """تحويل تاريخ نصي أو datetime إلى صيغة مناسبة للعرض."""
+    if not value:
+        return ''
+    if hasattr(value, 'strftime'):
+        return value.strftime(fmt)
+    for pattern in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d'):
+        try:
+            from datetime import datetime as _dt
+            return _dt.strptime(str(value)[:19], pattern).strftime(fmt)
+        except ValueError:
+            continue
+    return str(value)[:10]
+
+# ══════════════════════════════════════════════════════════════
+#  مجلدات البيانات
+# ══════════════════════════════════════════════════════════════
+
+BASE_DIR    = os.path.abspath(os.path.dirname(__file__))
+DATA_DIR    = os.environ.get('DATA_DIR', os.path.join(BASE_DIR, 'data'))
+TENANTS_DIR = os.path.join(DATA_DIR, 'tenants')
+MAIN_DB     = os.path.join(DATA_DIR, 'main.db')
+
+os.makedirs(TENANTS_DIR, exist_ok=True)
+
+# ══════════════════════════════════════════════════════════════
+#  قاعدة بيانات المؤسسات الرئيسية (main.db)
+# ══════════════════════════════════════════════════════════════
+
+app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{MAIN_DB}'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-db = SQLAlchemy(app)
+main_db = SQLAlchemy(app)
 
-from flask import g
+class Tenant(main_db.Model):
+    __tablename__ = 'tenants'
+    id            = main_db.Column(main_db.Integer, primary_key=True)
+    slug          = main_db.Column(main_db.String(60), unique=True, nullable=False)
+    org_name      = main_db.Column(main_db.String(200), nullable=False)
+    owner_name    = main_db.Column(main_db.String(100), nullable=False)
+    owner_email   = main_db.Column(main_db.String(150), unique=True, nullable=False)
+    owner_password= main_db.Column(main_db.String(200), nullable=False)
+    is_active     = main_db.Column(main_db.Boolean, default=True)
+    created_at    = main_db.Column(main_db.DateTime, default=datetime.utcnow)
 
-@app.before_request
-def load_system_settings():
-    try:
-        s = SystemSettings.query.first()
-        if s:
-            g.sys_name = s.system_name
-            g.sys_subtitle = s.system_subtitle
-        else:
-            g.sys_name = 'نظام إدارة الطلاب'
-            g.sys_subtitle = 'Student Management System'
-    except:
-        g.sys_name = 'نظام إدارة الطلاب'
-        g.sys_subtitle = 'Student Management System'
+    def db_path(self):
+        return os.path.join(TENANTS_DIR, f'{self.slug}.db')
 
-# ─── Models ───────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+#  جلسات قواعد بيانات المؤسسات (ديناميكية)
+# ══════════════════════════════════════════════════════════════
 
-class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(50), unique=True, nullable=False)
-    password = db.Column(db.String(100), nullable=False)
-    name = db.Column(db.String(100), nullable=False)
-    role = db.Column(db.String(20), default='teacher')  # admin / teacher
-    permissions = db.Column(db.Text, default='[]')  # JSON list of permission keys
-    is_active = db.Column(db.Boolean, default=True)
+_tenant_engines = {}   # cache للـ engines
 
-    def get_permissions(self):
-        try:
-            return json.loads(self.permissions or '[]')
-        except:
-            return []
-
-    def has_perm(self, perm):
-        if self.role == 'admin':
-            return True
-        return perm in self.get_permissions()
-
-class SystemSettings(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    system_name = db.Column(db.String(200), default='نظام إدارة الطلاب')
-    system_subtitle = db.Column(db.String(200), default='Student Management System')
-    school_name = db.Column(db.String(200), default='')
-    school_year = db.Column(db.String(50), default='')
-    admin_phone = db.Column(db.String(50), default='')
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-    @staticmethod
-    def get():
-        s = SystemSettings.query.first()
-        if not s:
-            s = SystemSettings()
-            db.session.add(s)
-            db.session.commit()
-        return s
-
-class Student(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
-    grade = db.Column(db.String(20), nullable=False)
-    semester = db.Column(db.String(20), default='الأول')
-    student_phone = db.Column(db.String(20))
-    parent_name = db.Column(db.String(100))
-    parent_phone = db.Column(db.String(20))
-    # أيام الحضور: مخزنة كـ JSON مثل ["السبت","الأحد","الاثنين"]
-    attendance_days = db.Column(db.Text, default='[]')
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    attendances = db.relationship('Attendance', backref='student', lazy=True, cascade='all, delete-orphan')
-
-    def get_attendance_days(self):
-        try:
-            return json.loads(self.attendance_days or '[]')
-        except:
-            return []
-
-    def set_attendance_days(self, days_list):
-        self.attendance_days = json.dumps(days_list, ensure_ascii=False)
-
-class Attendance(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    student_id = db.Column(db.Integer, db.ForeignKey('student.id'), nullable=False)
-    date = db.Column(db.Date, nullable=False, default=date.today)
-    status = db.Column(db.String(10), nullable=False)  # present / absent / late
-    note = db.Column(db.String(200))
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-# ─── Helpers ──────────────────────────────────────────────────────────────────
-
-ARABIC_DAYS = {
-    0: 'الاثنين',
-    1: 'الثلاثاء',
-    2: 'الأربعاء',
-    3: 'الخميس',
-    4: 'الجمعة',
-    5: 'السبت',
-    6: 'الأحد',
-}
-
-ALL_DAYS_ORDER = ['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة']
-
-def get_day_name_ar(d: date) -> str:
-    return ARABIC_DAYS[d.weekday()]
-
-def student_scheduled_today(student, d: date) -> bool:
-    """هل الطالب مجدول حضوره في هذا اليوم؟"""
-    days = student.get_attendance_days()
-    if not days:
-        return True  # إذا لم تُحدد أيام، يظهر دائماً
-    return get_day_name_ar(d) in days
-
-# ─── Auth ──────────────────────────────────────────────────────────────────────
-
-def login_required(f):
-    from functools import wraps
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if 'user_id' not in session:
-            return redirect(url_for('login'))
-        return f(*args, **kwargs)
-    return decorated
-
-@app.route('/', methods=['GET', 'POST'])
-def login():
-    if 'user_id' in session:
-        return redirect(url_for('dashboard'))
-    error = None
-    if request.method == 'POST':
-        username = request.form.get('username', '').strip()
-        password = request.form.get('password', '').strip()
-        user = User.query.filter_by(username=username, password=password).first()
-        if user:
-            session['user_id'] = user.id
-            session['user_name'] = user.name
-            session['user_role'] = user.role
-            return redirect(url_for('dashboard'))
-        error = 'اسم المستخدم أو كلمة المرور غير صحيحة'
-    return render_template('login.html', error=error)
-
-@app.route('/logout')
-def logout():
-    session.clear()
-    return redirect(url_for('login'))
-
-# ─── Dashboard ────────────────────────────────────────────────────────────────
-
-@app.route('/dashboard')
-@login_required
-def dashboard():
-    total_students = Student.query.count()
-    today = date.today()
-    today_records = Attendance.query.filter_by(date=today).all()
-    present_today = sum(1 for r in today_records if r.status == 'present')
-    absent_today = sum(1 for r in today_records if r.status == 'absent')
-    late_today = sum(1 for r in today_records if r.status == 'late')
-    grades = db.session.query(Student.grade, db.func.count(Student.id)).group_by(Student.grade).all()
-    return render_template('dashboard.html',
-        total_students=total_students,
-        present_today=present_today,
-        absent_today=absent_today,
-        late_today=late_today,
-        grades=grades,
-        today=today.strftime('%Y-%m-%d')
-    )
-
-# ─── Students ─────────────────────────────────────────────────────────────────
-
-@app.route('/students')
-@login_required
-def students():
-    grade_filter = request.args.get('grade', '')
-    search = request.args.get('search', '')
-    query = Student.query
-    if grade_filter:
-        query = query.filter_by(grade=grade_filter)
-    if search:
-        query = query.filter(Student.name.ilike(f'%{search}%'))
-    students_list = query.order_by(Student.name).all()
-    grades = db.session.query(Student.grade).distinct().order_by(Student.grade).all()
-    grades = [g[0] for g in grades]
-    return render_template('students.html', students=students_list, grades=grades,
-                           grade_filter=grade_filter, search=search,
-                           all_days=ALL_DAYS_ORDER)
-
-@app.route('/students/add', methods=['GET', 'POST'])
-@login_required
-def add_student():
-    if request.method == 'POST':
-        selected_days = request.form.getlist('attendance_days')
-        student = Student(
-            name=request.form['name'].strip(),
-            grade=request.form['grade'].strip(),
-            semester=request.form.get('semester', 'الأول').strip(),
-            student_phone=request.form.get('student_phone', '').strip(),
-            parent_name=request.form.get('parent_name', '').strip(),
-            parent_phone=request.form.get('parent_phone', '').strip(),
+def get_tenant_engine(slug):
+    if slug not in _tenant_engines:
+        db_path = os.path.join(TENANTS_DIR, f'{slug}.db')
+        engine  = create_engine(
+            f'sqlite:///{db_path}',
+            connect_args={'check_same_thread': False},
+            pool_pre_ping=True,
+            pool_size=5,
+            max_overflow=10,
+            pool_timeout=30,
+            pool_recycle=1800,
         )
-        student.set_attendance_days(selected_days)
-        db.session.add(student)
-        db.session.commit()
-        flash('تم إضافة الطالب بنجاح', 'success')
-        return redirect(url_for('students'))
-    return render_template('student_form.html', student=None, action='add', all_days=ALL_DAYS_ORDER)
+        _tenant_engines[slug] = engine
+    return _tenant_engines[slug]
 
-@app.route('/students/edit/<int:id>', methods=['GET', 'POST'])
-@login_required
-def edit_student(id):
-    student = Student.query.get_or_404(id)
-    if request.method == 'POST':
-        selected_days = request.form.getlist('attendance_days')
-        student.name = request.form['name'].strip()
-        student.grade = request.form['grade'].strip()
-        student.semester = request.form.get('semester', 'الأول').strip()
-        student.student_phone = request.form.get('student_phone', '').strip()
-        student.parent_name = request.form.get('parent_name', '').strip()
-        student.parent_phone = request.form.get('parent_phone', '').strip()
-        student.set_attendance_days(selected_days)
-        db.session.commit()
-        flash('تم تعديل بيانات الطالب', 'success')
-        return redirect(url_for('students'))
-    return render_template('student_form.html', student=student, action='edit', all_days=ALL_DAYS_ORDER)
+_tenant_sessions = {}  # cache للـ scoped sessions
 
-@app.route('/students/delete/<int:id>', methods=['POST'])
-@login_required
-def delete_student(id):
-    student = Student.query.get_or_404(id)
-    db.session.delete(student)
-    db.session.commit()
-    flash('تم حذف الطالب', 'warning')
-    return redirect(url_for('students'))
+def get_tenant_session(slug):
+    if slug not in _tenant_sessions:
+        engine = get_tenant_engine(slug)
+        _tenant_sessions[slug] = scoped_session(sessionmaker(bind=engine))
+    return _tenant_sessions[slug]()
 
-# ─── Attendance ───────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+#  إنشاء جداول المؤسسة الجديدة
+# ══════════════════════════════════════════════════════════════
 
-@app.route('/attendance')
-@login_required
-def attendance():
-    selected_date = request.args.get('date', date.today().strftime('%Y-%m-%d'))
-    grade_filter = request.args.get('grade', '')
-    show_all = request.args.get('show_all', '0') == '1'
-    try:
-        att_date = datetime.strptime(selected_date, '%Y-%m-%d').date()
-    except:
-        att_date = date.today()
+TENANT_SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    username  TEXT UNIQUE NOT NULL,
+    password  TEXT NOT NULL,
+    name      TEXT NOT NULL,
+    role      TEXT DEFAULT 'teacher',
+    permissions TEXT DEFAULT '[]',
+    is_active INTEGER DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS system_settings (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    system_name     TEXT DEFAULT 'نظام إدارة الطلاب',
+    system_subtitle TEXT DEFAULT 'Student Management System',
+    school_name     TEXT DEFAULT '',
+    school_year     TEXT DEFAULT '',
+    admin_phone     TEXT DEFAULT '',
+    updated_at      TEXT
+);
+CREATE TABLE IF NOT EXISTS students (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT NOT NULL,
+    grade           TEXT NOT NULL,
+    semester        TEXT DEFAULT 'الأول',
+    student_phone   TEXT DEFAULT '',
+    parent_name     TEXT DEFAULT '',
+    parent_phone    TEXT DEFAULT '',
+    attendance_days TEXT DEFAULT '[]',
+    created_at      TEXT
+);
+CREATE TABLE IF NOT EXISTS attendance (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_id INTEGER NOT NULL,
+    date       TEXT NOT NULL,
+    status     TEXT NOT NULL,
+    note       TEXT DEFAULT '',
+    created_at TEXT
+);
+"""
 
-    day_name = get_day_name_ar(att_date)
+def create_tenant_db(slug, org_name, owner_name, owner_email, owner_password):
+    """ينشئ ملف SQLite للمؤسسة ويضع البيانات الأساسية."""
+    engine = get_tenant_engine(slug)
+    with engine.connect() as conn:
+        for stmt in TENANT_SCHEMA.strip().split(';'):
+            stmt = stmt.strip()
+            if stmt:
+                conn.execute(text(stmt))
+        # المدير الأول
+        conn.execute(text(
+            "INSERT OR IGNORE INTO users (username,password,name,role,permissions,is_active) "
+            "VALUES (:u,:p,:n,'admin','[]',1)"
+        ), {'u': owner_email, 'p': owner_password, 'n': owner_name})
+        # إعدادات المؤسسة
+        conn.execute(text(
+            "INSERT OR IGNORE INTO system_settings (system_name,system_subtitle,school_name,updated_at) "
+            "VALUES (:n,'Student Management System',:o,:d)"
+        ), {'n': org_name, 'o': org_name, 'd': datetime.utcnow().isoformat()})
+        conn.commit()
 
-    query = Student.query
-    if grade_filter:
-        query = query.filter_by(grade=grade_filter)
-    all_students = query.order_by(Student.name).all()
+# ══════════════════════════════════════════════════════════════
+#  Helpers للاستعلامات على قاعدة بيانات المؤسسة
+# ══════════════════════════════════════════════════════════════
 
-    # فلترة الطلاب المجدولين في هذا اليوم
-    if show_all:
-        students_list = all_students
-    else:
-        students_list = [s for s in all_students if student_scheduled_today(s, att_date)]
+def tdb():
+    """إرجاع جلسة قاعدة بيانات المؤسسة الحالية."""
+    return g.tenant_session
 
-    scheduled_count = len([s for s in all_students if student_scheduled_today(s, att_date)])
-    total_count = len(all_students)
+def t_fetchall(sql, params=None):
+    result = tdb().execute(text(sql), params or {})
+    rows   = result.fetchall()
+    keys   = result.keys()
+    return [dict(zip(keys, row)) for row in rows]
 
-    existing = {a.student_id: a for a in Attendance.query.filter_by(date=att_date).all()}
-    grades = db.session.query(Student.grade).distinct().order_by(Student.grade).all()
-    grades = [g[0] for g in grades]
+def t_fetchone(sql, params=None):
+    result = tdb().execute(text(sql), params or {})
+    row    = result.fetchone()
+    return dict(zip(result.keys(), row)) if row else None
 
-    return render_template('attendance.html',
-        students=students_list,
-        existing=existing,
-        selected_date=selected_date,
-        att_date=att_date,
-        day_name=day_name,
-        grades=grades,
-        grade_filter=grade_filter,
-        show_all=show_all,
-        scheduled_count=scheduled_count,
-        total_count=total_count
-    )
+def t_execute(sql, params=None):
+    tdb().execute(text(sql), params or {})
+    tdb().commit()
 
-@app.route('/attendance/save', methods=['POST'])
-@login_required
-def save_attendance():
-    data = request.get_json()
-    att_date = datetime.strptime(data['date'], '%Y-%m-%d').date()
-    records = data.get('records', [])
-    for rec in records:
-        existing = Attendance.query.filter_by(student_id=rec['student_id'], date=att_date).first()
-        if existing:
-            existing.status = rec['status']
-            existing.note = rec.get('note', '')
-        else:
-            att = Attendance(student_id=rec['student_id'], date=att_date,
-                             status=rec['status'], note=rec.get('note', ''))
-            db.session.add(att)
-    db.session.commit()
-    return jsonify({'success': True, 'message': 'تم حفظ الحضور بنجاح'})
+def t_last_id():
+    return tdb().execute(text("SELECT last_insert_rowid()")).scalar()
 
-# ─── Reports / Follow-up ──────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+#  ثوابت مشتركة
+# ══════════════════════════════════════════════════════════════
 
-@app.route('/reports')
-@login_required
-def reports():
-    grade_filter = request.args.get('grade', '')
-    date_from = request.args.get('date_from', '')
-    date_to = request.args.get('date_to', '')
-    status_filter = request.args.get('status_filter', '')  # present / absent / late / ''
-
-    query = db.session.query(Student,
-        db.func.count(Attendance.id).label('total'),
-        db.func.sum(db.case((Attendance.status == 'absent', 1), else_=0)).label('absences'),
-        db.func.sum(db.case((Attendance.status == 'late', 1), else_=0)).label('lates'),
-        db.func.sum(db.case((Attendance.status == 'present', 1), else_=0)).label('presents')
-    ).outerjoin(Attendance)
-
-    if grade_filter:
-        query = query.filter(Student.grade == grade_filter)
-    if date_from:
-        query = query.filter(Attendance.date >= datetime.strptime(date_from, '%Y-%m-%d').date())
-    if date_to:
-        query = query.filter(Attendance.date <= datetime.strptime(date_to, '%Y-%m-%d').date())
-
-    results = query.group_by(Student.id).order_by(Student.name).all()
-
-    # فلترة بالحالة إذا طُلب ذلك
-    if status_filter == 'present':
-        results = [r for r in results if (r.presents or 0) > 0]
-    elif status_filter == 'absent':
-        results = [r for r in results if (r.absences or 0) > 0]
-    elif status_filter == 'late':
-        results = [r for r in results if (r.lates or 0) > 0]
-
-    grades = db.session.query(Student.grade).distinct().order_by(Student.grade).all()
-    grades = [g[0] for g in grades]
-
-    # إحصائيات إجمالية
-    total_present = sum(r.presents or 0 for r in results)
-    total_absent = sum(r.absences or 0 for r in results)
-    total_late = sum(r.lates or 0 for r in results)
-
-    return render_template('reports.html', results=results, grades=grades,
-                           grade_filter=grade_filter, date_from=date_from, date_to=date_to,
-                           status_filter=status_filter,
-                           total_present=total_present,
-                           total_absent=total_absent,
-                           total_late=total_late)
-
-@app.route('/send_whatsapp/<int:student_id>')
-@login_required
-def send_whatsapp(student_id):
-    student = Student.query.get_or_404(student_id)
-    date_from = request.args.get('date_from', '')
-    date_to = request.args.get('date_to', '')
-
-    query = Attendance.query.filter_by(student_id=student_id)
-    if date_from:
-        query = query.filter(Attendance.date >= datetime.strptime(date_from, '%Y-%m-%d').date())
-    if date_to:
-        query = query.filter(Attendance.date <= datetime.strptime(date_to, '%Y-%m-%d').date())
-
-    records = query.order_by(Attendance.date).all()
-    total = len(records)
-    absences = sum(1 for r in records if r.status == 'absent')
-    lates = sum(1 for r in records if r.status == 'late')
-    presents = sum(1 for r in records if r.status == 'present')
-
-    absent_dates = [r.date.strftime('%Y/%m/%d') for r in records if r.status == 'absent']
-    late_dates = [r.date.strftime('%Y/%m/%d') for r in records if r.status == 'late']
-
-    msg = f"📚 *تقرير متابعة الطالب*\n"
-    msg += f"━━━━━━━━━━━━━━━━━━\n"
-    msg += f"👤 الطالب: *{student.name}*\n"
-    msg += f"🏫 الصف: {student.grade}\n"
-    msg += f"━━━━━━━━━━━━━━━━━━\n"
-    msg += f"✅ أيام الحضور: {presents}\n"
-    msg += f"❌ أيام الغياب: {absences}\n"
-    msg += f"⏰ أيام التأخر: {lates}\n"
-    msg += f"📊 إجمالي الأيام: {total}\n"
-    if absent_dates:
-        msg += f"━━━━━━━━━━━━━━━━━━\n"
-        msg += f"📅 تواريخ الغياب:\n"
-        for d in absent_dates[-5:]:
-            msg += f"  • {d}\n"
-    if late_dates:
-        msg += f"📅 تواريخ التأخر:\n"
-        for d in late_dates[-5:]:
-            msg += f"  • {d}\n"
-    msg += f"━━━━━━━━━━━━━━━━━━\n"
-    msg += f"🏫 إدارة المدرسة"
-
-    phone = student.parent_phone.replace(' ', '').replace('-', '').replace('+', '')
-    if phone.startswith('0'):
-        phone = '20' + phone[1:]
-    if not phone.startswith('20'):
-        phone = '20' + phone
-
-    wa_url = f"https://wa.me/{phone}?text={urllib.parse.quote(msg)}"
-    return redirect(wa_url)
-
-
-# ─── User Management ──────────────────────────────────────────────────────────
-
-def admin_required(f):
-    from functools import wraps
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if session.get('user_role') != 'admin':
-            flash('هذه الصفحة للمديرين فقط', 'warning')
-            return redirect(url_for('dashboard'))
-        return f(*args, **kwargs)
-    return decorated
+ARABIC_DAYS    = {0:'الاثنين',1:'الثلاثاء',2:'الأربعاء',3:'الخميس',4:'الجمعة',5:'السبت',6:'الأحد'}
+ALL_DAYS_ORDER = ['السبت','الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة']
 
 PERMISSIONS = {
     'view_students':  'عرض الطلاب',
@@ -435,393 +198,635 @@ PERMISSIONS = {
     'manage_users':   'إدارة المستخدمين',
 }
 
-@app.route('/users')
-@login_required
-@admin_required
-def users():
-    users_list = User.query.order_by(User.name).all()
-    return render_template('users.html', users=users_list, permissions=PERMISSIONS)
+# ══════════════════════════════════════════════════════════════
+#  Decorators
+# ══════════════════════════════════════════════════════════════
 
-@app.route('/users/add', methods=['GET', 'POST'])
-@login_required
-@admin_required
-def add_user():
+def load_tenant(f):
+    """يتحقق من وجود المؤسسة ويفتح جلستها."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        slug   = kwargs.get('slug', '')
+        tenant = Tenant.query.filter_by(slug=slug, is_active=True).first()
+        if not tenant:
+            return render_template('404.html'), 404
+        g.tenant      = tenant
+        g.tenant_slug = slug
+        # افتح جلسة قاعدة بيانات المؤسسة
+        g.tenant_session = get_tenant_session(slug)
+        # إعدادات النظام للـ base.html
+        s = t_fetchone("SELECT * FROM system_settings LIMIT 1")
+        g.sys_name     = s['system_name']     if s else 'نظام إدارة الطلاب'
+        g.sys_subtitle = s['system_subtitle'] if s else 'Student Management System'
+        return f(*args, **kwargs)
+    return decorated
+
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'user_id' not in session or session.get('tenant_slug') != kwargs.get('slug',''):
+            return redirect(url_for('tenant_login', slug=kwargs.get('slug','')))
+        return f(*args, **kwargs)
+    return decorated
+
+def admin_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if session.get('user_role') != 'admin':
+            flash('هذه الصفحة للمديرين فقط', 'warning')
+            return redirect(url_for('dashboard', slug=kwargs.get('slug','')))
+        return f(*args, **kwargs)
+    return decorated
+
+# ══════════════════════════════════════════════════════════════
+#  الصفحات العامة (قبل الدخول)
+# ══════════════════════════════════════════════════════════════
+
+
+@app.teardown_appcontext
+def close_tenant_session(exception=None):
+    """أغلق جلسة قاعدة بيانات المؤسسة بعد كل طلب لتجنب استنزاف الـ connection pool."""
+    session = g.pop('tenant_session', None)
+    if session is not None:
+        if exception:
+            session.rollback()
+        else:
+            try:
+                session.commit()
+            except Exception:
+                session.rollback()
+        session.close()
+
+@app.route('/')
+def home():
+    return render_template('home.html')
+
+@app.route('/register', methods=['GET','POST'])
+def register():
+    error = None
     if request.method == 'POST':
-        username = request.form['username'].strip()
-        if User.query.filter_by(username=username).first():
-            flash('اسم المستخدم موجود مسبقاً', 'warning')
-            return render_template('user_form.html', user=None, action='add', permissions=PERMISSIONS)
-        perms = request.form.getlist('permissions')
-        user = User(
-            username=username,
-            password=request.form['password'].strip(),
-            name=request.form['name'].strip(),
-            role=request.form.get('role', 'teacher'),
-            permissions=json.dumps(perms, ensure_ascii=False)
+        org_name  = request.form.get('org_name','').strip()
+        slug_raw  = request.form.get('slug','').strip().lower()
+        slug      = re.sub(r'[^a-z0-9_]', '', slug_raw)
+        owner     = request.form.get('owner_name','').strip()
+        email_username = re.sub(r'[^a-z0-9._-]', '', request.form.get('email_username','').strip().lower())
+        email     = email_username + '@sysmakers.com' if email_username else ''
+        password  = request.form.get('password','').strip()
+        password2 = request.form.get('password2','').strip()
+
+        if not all([org_name, slug, owner, email, password]):
+            error = 'يرجى تعبئة جميع الحقول'
+        elif len(slug) < 3:
+            error = 'رمز المؤسسة يجب أن يكون 3 أحرف على الأقل'
+        elif password != password2:
+            error = 'كلمتا المرور غير متطابقتين'
+        elif len(password) < 6:
+            error = 'كلمة المرور يجب أن تكون 6 أحرف على الأقل'
+        elif Tenant.query.filter_by(slug=slug).first():
+            error = 'رمز المؤسسة مستخدم، اختر رمزاً آخر'
+        elif Tenant.query.filter_by(owner_email=email).first():
+            error = 'البريد الإلكتروني مسجل مسبقاً'
+        else:
+            tenant = Tenant(slug=slug, org_name=org_name, owner_name=owner,
+                            owner_email=email, owner_password=password)
+            main_db.session.add(tenant)
+            main_db.session.commit()
+            create_tenant_db(slug, org_name, owner, email, password)
+            flash(f'تم إنشاء مؤسستك بنجاح! | بريدك: {email} | رابط الدخول: /org/{slug}/login', 'success')
+            return redirect(url_for('tenant_login', slug=slug))
+    return render_template('register.html', error=error)
+
+# ══════════════════════════════════════════════════════════════
+#  روابط المؤسسة /org/<slug>/...
+# ══════════════════════════════════════════════════════════════
+
+@app.route('/org/<slug>/')
+@app.route('/org/<slug>/login', methods=['GET','POST'])
+@load_tenant
+def tenant_login(slug):
+    if 'user_id' in session and session.get('tenant_slug') == slug:
+        return redirect(url_for('dashboard', slug=slug))
+    error = None
+    if request.method == 'POST':
+        username = request.form.get('username','').strip()
+        password = request.form.get('password','').strip()
+        user = t_fetchone(
+            "SELECT * FROM users WHERE username=:u AND password=:p AND is_active=1",
+            {'u': username, 'p': password}
         )
-        db.session.add(user)
-        db.session.commit()
-        flash('تم إضافة المستخدم بنجاح', 'success')
-        return redirect(url_for('users'))
-    return render_template('user_form.html', user=None, action='add', permissions=PERMISSIONS)
+        if user:
+            session.clear()
+            session['user_id']    = user['id']
+            session['user_name']  = user['name']
+            session['user_role']  = user['role']
+            session['tenant_slug']= slug
+            return redirect(url_for('dashboard', slug=slug))
+        error = 'اسم المستخدم أو كلمة المرور غير صحيحة'
+    return render_template('login.html', error=error, slug=slug, org_name=g.tenant.org_name)
 
-@app.route('/users/edit/<int:id>', methods=['GET', 'POST'])
+@app.route('/org/<slug>/logout')
+def tenant_logout(slug):
+    session.clear()
+    return redirect(url_for('tenant_login', slug=slug))
+
+# ─── Dashboard ────────────────────────────────────────────────
+
+@app.route('/org/<slug>/dashboard')
+@load_tenant
+@login_required
+def dashboard(slug):
+    today   = date.today().isoformat()
+    total   = t_fetchone("SELECT COUNT(*) c FROM students")['c']
+    present = t_fetchone("SELECT COUNT(*) c FROM attendance WHERE date=:d AND status='present'",{'d':today})['c']
+    absent  = t_fetchone("SELECT COUNT(*) c FROM attendance WHERE date=:d AND status='absent'", {'d':today})['c']
+    late    = t_fetchone("SELECT COUNT(*) c FROM attendance WHERE date=:d AND status='late'",   {'d':today})['c']
+    grades  = t_fetchall("SELECT grade, COUNT(*) cnt FROM students GROUP BY grade")
+    return render_template('dashboard.html', slug=slug,
+        total_students=total, present_today=present,
+        absent_today=absent,  late_today=late,
+        grades=[(r['grade'],r['cnt']) for r in grades],
+        today=today)
+
+# ─── Students ─────────────────────────────────────────────────
+
+@app.route('/org/<slug>/students')
+@load_tenant
+@login_required
+def students(slug):
+    gf     = request.args.get('grade','')
+    search = request.args.get('search','')
+    sql    = "SELECT * FROM students WHERE 1=1"
+    params = {}
+    if gf:     sql += " AND grade=:g";       params['g'] = gf
+    if search: sql += " AND name LIKE :s";   params['s'] = f'%{search}%'
+    sql += " ORDER BY name"
+    students_list = t_fetchall(sql, params)
+    grades = [r['grade'] for r in t_fetchall("SELECT DISTINCT grade FROM students ORDER BY grade")]
+    return render_template('students.html', slug=slug, students=students_list,
+                           grades=grades, grade_filter=gf, search=search, all_days=ALL_DAYS_ORDER)
+
+@app.route('/org/<slug>/students/add', methods=['GET','POST'])
+@load_tenant
+@login_required
+def add_student(slug):
+    if request.method == 'POST':
+        days = json.dumps(request.form.getlist('attendance_days'), ensure_ascii=False)
+        t_execute(
+            "INSERT INTO students (name,grade,semester,student_phone,parent_name,parent_phone,attendance_days,created_at) "
+            "VALUES (:n,:g,:se,:sp,:pn,:pp,:ad,:ca)",
+            {'n':request.form['name'].strip(),'g':request.form['grade'].strip(),
+             'se':request.form.get('semester','الأول').strip(),
+             'sp':request.form.get('student_phone','').strip(),
+             'pn':request.form.get('parent_name','').strip(),
+             'pp':request.form.get('parent_phone','').strip(),
+             'ad':days, 'ca':datetime.utcnow().isoformat()}
+        )
+        flash('تم إضافة الطالب بنجاح', 'success')
+        return redirect(url_for('students', slug=slug))
+    return render_template('student_form.html', slug=slug, student=None, action='add', all_days=ALL_DAYS_ORDER)
+
+@app.route('/org/<slug>/students/edit/<int:sid>', methods=['GET','POST'])
+@load_tenant
+@login_required
+def edit_student(slug, sid):
+    student = t_fetchone("SELECT * FROM students WHERE id=:id", {'id':sid})
+    if not student: return redirect(url_for('students', slug=slug))
+    if request.method == 'POST':
+        days = json.dumps(request.form.getlist('attendance_days'), ensure_ascii=False)
+        t_execute(
+            "UPDATE students SET name=:n,grade=:g,semester=:se,student_phone=:sp,"
+            "parent_name=:pn,parent_phone=:pp,attendance_days=:ad WHERE id=:id",
+            {'n':request.form['name'].strip(),'g':request.form['grade'].strip(),
+             'se':request.form.get('semester','الأول').strip(),
+             'sp':request.form.get('student_phone','').strip(),
+             'pn':request.form.get('parent_name','').strip(),
+             'pp':request.form.get('parent_phone','').strip(),
+             'ad':days,'id':sid}
+        )
+        flash('تم تعديل بيانات الطالب', 'success')
+        return redirect(url_for('students', slug=slug))
+    student['attendance_days_list'] = json.loads(student.get('attendance_days') or '[]')
+    return render_template('student_form.html', slug=slug, student=student, action='edit', all_days=ALL_DAYS_ORDER)
+
+@app.route('/org/<slug>/students/delete/<int:sid>', methods=['POST'])
+@load_tenant
+@login_required
+def delete_student(slug, sid):
+    t_execute("DELETE FROM attendance WHERE student_id=:id", {'id':sid})
+    t_execute("DELETE FROM students WHERE id=:id", {'id':sid})
+    flash('تم حذف الطالب', 'warning')
+    return redirect(url_for('students', slug=slug))
+
+# ─── Attendance ───────────────────────────────────────────────
+
+@app.route('/org/<slug>/attendance')
+@load_tenant
+@login_required
+def attendance(slug):
+    sel_date     = request.args.get('date', date.today().isoformat())
+    grade_filter = request.args.get('grade','')
+    show_all     = request.args.get('show_all','0') == '1'
+    try:
+        att_date = datetime.strptime(sel_date,'%Y-%m-%d').date()
+    except:
+        att_date = date.today()
+    day_name = ARABIC_DAYS[att_date.weekday()]
+
+    sql    = "SELECT * FROM students WHERE 1=1"
+    params = {}
+    if grade_filter: sql += " AND grade=:g"; params['g'] = grade_filter
+    sql += " ORDER BY name"
+    all_students = t_fetchall(sql, params)
+
+    def scheduled(st):
+        days = json.loads(st.get('attendance_days') or '[]')
+        return (not days) or (day_name in days)
+
+    for s in all_students:
+        s['attendance_days_list'] = json.loads(s.get('attendance_days') or '[]')
+    students_list   = all_students if show_all else [s for s in all_students if scheduled(s)]
+    scheduled_count = sum(1 for s in all_students if scheduled(s))
+
+    att_records = t_fetchall("SELECT * FROM attendance WHERE date=:d", {'d': att_date.isoformat()})
+    existing    = {r['student_id']: r for r in att_records}
+    grades      = [r['grade'] for r in t_fetchall("SELECT DISTINCT grade FROM students ORDER BY grade")]
+
+    return render_template('attendance.html', slug=slug,
+        students=students_list, existing=existing,
+        selected_date=sel_date, att_date=att_date, day_name=day_name,
+        grades=grades, grade_filter=grade_filter,
+        show_all=show_all, scheduled_count=scheduled_count,
+        total_count=len(all_students))
+
+@app.route('/org/<slug>/attendance/save', methods=['POST'])
+@load_tenant
+@login_required
+def save_attendance(slug):
+    data     = request.get_json()
+    att_date = data['date']
+    for rec in data.get('records',[]):
+        existing = t_fetchone(
+            "SELECT id FROM attendance WHERE student_id=:s AND date=:d",
+            {'s':rec['student_id'],'d':att_date}
+        )
+        if existing:
+            t_execute("UPDATE attendance SET status=:st,note=:no WHERE id=:id",
+                      {'st':rec['status'],'no':rec.get('note',''),'id':existing['id']})
+        else:
+            t_execute(
+                "INSERT INTO attendance (student_id,date,status,note,created_at) VALUES (:s,:d,:st,:no,:ca)",
+                {'s':rec['student_id'],'d':att_date,'st':rec['status'],
+                 'no':rec.get('note',''),'ca':datetime.utcnow().isoformat()}
+            )
+    return jsonify({'success':True,'message':'تم حفظ الحضور بنجاح'})
+
+# ─── Reports ──────────────────────────────────────────────────
+
+@app.route('/org/<slug>/reports')
+@load_tenant
+@login_required
+def reports(slug):
+    gf            = request.args.get('grade','')
+    date_from     = request.args.get('date_from','')
+    date_to       = request.args.get('date_to','')
+    status_filter = request.args.get('status_filter','')
+
+    sql = """
+        SELECT s.*,
+            COUNT(a.id)                                    AS total,
+            SUM(CASE WHEN a.status='absent'  THEN 1 ELSE 0 END) AS absences,
+            SUM(CASE WHEN a.status='late'    THEN 1 ELSE 0 END) AS lates,
+            SUM(CASE WHEN a.status='present' THEN 1 ELSE 0 END) AS presents
+        FROM students s LEFT JOIN attendance a ON s.id=a.student_id
+        WHERE 1=1
+    """
+    params = {}
+    if gf:        sql += " AND s.grade=:g";    params['g']  = gf
+    if date_from: sql += " AND a.date>=:df";   params['df'] = date_from
+    if date_to:   sql += " AND a.date<=:dt";   params['dt'] = date_to
+    sql += " GROUP BY s.id ORDER BY s.name"
+    rows = t_fetchall(sql, params)
+
+    if status_filter == 'present': rows = [r for r in rows if (r['presents'] or 0) > 0]
+    elif status_filter == 'absent': rows = [r for r in rows if (r['absences'] or 0) > 0]
+    elif status_filter == 'late':   rows = [r for r in rows if (r['lates']    or 0) > 0]
+
+    grades = [r['grade'] for r in t_fetchall("SELECT DISTINCT grade FROM students ORDER BY grade")]
+
+    class Row:
+        def __init__(self,d):
+            self.__dict__.update(d)
+            self.student  = self
+            self.absences = d.get('absences') or 0
+            self.lates    = d.get('lates')    or 0
+            self.presents = d.get('presents') or 0
+            self.total    = d.get('total')    or 0
+
+    results = [Row(r) for r in rows]
+    return render_template('reports.html', slug=slug,
+        results=results, grades=grades,
+        grade_filter=gf, date_from=date_from, date_to=date_to,
+        status_filter=status_filter,
+        total_present=sum(r.presents for r in results),
+        total_absent =sum(r.absences for r in results),
+        total_late   =sum(r.lates    for r in results))
+
+@app.route('/org/<slug>/send_whatsapp/<int:sid>')
+@load_tenant
+@login_required
+def send_whatsapp(slug, sid):
+    student  = t_fetchone("SELECT * FROM students WHERE id=:id",{'id':sid})
+    if not student: return redirect(url_for('reports', slug=slug))
+    date_from = request.args.get('date_from','')
+    date_to   = request.args.get('date_to','')
+    sql = "SELECT * FROM attendance WHERE student_id=:s"
+    params = {'s':sid}
+    if date_from: sql += " AND date>=:df"; params['df'] = date_from
+    if date_to:   sql += " AND date<=:dt"; params['dt'] = date_to
+    sql += " ORDER BY date"
+    records  = t_fetchall(sql, params)
+    presents = sum(1 for r in records if r['status']=='present')
+    absences = sum(1 for r in records if r['status']=='absent')
+    lates    = sum(1 for r in records if r['status']=='late')
+    absent_dates = [r['date'] for r in records if r['status']=='absent']
+
+    msg  = f"📚 *تقرير متابعة الطالب*\n━━━━━━━━━━━━━━━━━━\n"
+    msg += f"👤 الطالب: *{student['name']}*\n🏫 الصف: {student['grade']}\n━━━━━━━━━━━━━━━━━━\n"
+    msg += f"✅ أيام الحضور: {presents}\n❌ أيام الغياب: {absences}\n⏰ أيام التأخر: {lates}\n📊 إجمالي: {len(records)}\n"
+    if absent_dates:
+        msg += "━━━━━━━━━━━━━━━━━━\n📅 تواريخ الغياب:\n"
+        for d in absent_dates[-5:]: msg += f"  • {d}\n"
+    msg += "━━━━━━━━━━━━━━━━━━\n🏫 إدارة المدرسة"
+
+    phone = (student['parent_phone'] or '').replace(' ','').replace('-','').replace('+','')
+    if phone.startswith('0'): phone = '966' + phone[1:]
+    if not phone.startswith('966'): phone = '966' + phone
+    return redirect(f"https://wa.me/{phone}?text={urllib.parse.quote(msg)}")
+
+# ─── Users ────────────────────────────────────────────────────
+
+@app.route('/org/<slug>/users')
+@load_tenant
 @login_required
 @admin_required
-def edit_user(id):
-    user = User.query.get_or_404(id)
+def users(slug):
+    users_list = t_fetchall("SELECT * FROM users ORDER BY name")
+    for u in users_list:
+        u['permissions_list'] = json.loads(u.get('permissions') or '[]')
+    return render_template('users.html', slug=slug, users=users_list, permissions=PERMISSIONS)
+
+@app.route('/org/<slug>/users/add', methods=['GET','POST'])
+@load_tenant
+@login_required
+@admin_required
+def add_user(slug):
     if request.method == 'POST':
         username = request.form['username'].strip()
-        existing = User.query.filter_by(username=username).first()
-        if existing and existing.id != id:
-            flash('اسم المستخدم موجود مسبقاً', 'warning')
-            return render_template('user_form.html', user=user, action='edit', permissions=PERMISSIONS)
-        user.username = username
-        user.name = request.form['name'].strip()
-        user.role = request.form.get('role', 'teacher')
-        perms = request.form.getlist('permissions')
-        user.permissions = json.dumps(perms, ensure_ascii=False)
-        new_pass = request.form.get('password', '').strip()
+        if t_fetchone("SELECT id FROM users WHERE username=:u",{'u':username}):
+            flash('اسم المستخدم موجود مسبقاً','warning')
+            return render_template('user_form.html', slug=slug, user=None, action='add', permissions=PERMISSIONS)
+        perms = json.dumps(request.form.getlist('permissions'), ensure_ascii=False)
+        t_execute(
+            "INSERT INTO users (username,password,name,role,permissions,is_active) VALUES (:u,:p,:n,:r,:perms,1)",
+            {'u':username,'p':request.form['password'].strip(),
+             'n':request.form['name'].strip(),'r':request.form.get('role','teacher'),'perms':perms}
+        )
+        flash('تم إضافة المستخدم بنجاح','success')
+        return redirect(url_for('users', slug=slug))
+    return render_template('user_form.html', slug=slug, user=None, action='add', permissions=PERMISSIONS)
+
+@app.route('/org/<slug>/users/edit/<int:uid>', methods=['GET','POST'])
+@load_tenant
+@login_required
+@admin_required
+def edit_user(slug, uid):
+    user = t_fetchone("SELECT * FROM users WHERE id=:id",{'id':uid})
+    if not user: return redirect(url_for('users', slug=slug))
+    if request.method == 'POST':
+        username = request.form['username'].strip()
+        dup = t_fetchone("SELECT id FROM users WHERE username=:u AND id!=:id",{'u':username,'id':uid})
+        if dup:
+            flash('اسم المستخدم موجود مسبقاً','warning')
+            return render_template('user_form.html', slug=slug, user=user, action='edit', permissions=PERMISSIONS)
+        perms    = json.dumps(request.form.getlist('permissions'), ensure_ascii=False)
+        new_pass = request.form.get('password','').strip()
         if new_pass:
-            user.password = new_pass
-        db.session.commit()
-        flash('تم تعديل المستخدم بنجاح', 'success')
-        return redirect(url_for('users'))
-    return render_template('user_form.html', user=user, action='edit', permissions=PERMISSIONS)
+            t_execute("UPDATE users SET username=:u,name=:n,role=:r,permissions=:perms,password=:p WHERE id=:id",
+                {'u':username,'n':request.form['name'].strip(),'r':request.form.get('role','teacher'),
+                 'perms':perms,'p':new_pass,'id':uid})
+        else:
+            t_execute("UPDATE users SET username=:u,name=:n,role=:r,permissions=:perms WHERE id=:id",
+                {'u':username,'n':request.form['name'].strip(),'r':request.form.get('role','teacher'),
+                 'perms':perms,'id':uid})
+        flash('تم تعديل المستخدم بنجاح','success')
+        return redirect(url_for('users', slug=slug))
+    user['permissions_list'] = json.loads(user.get('permissions') or '[]')
+    return render_template('user_form.html', slug=slug, user=user, action='edit', permissions=PERMISSIONS)
 
-@app.route('/users/delete/<int:id>', methods=['POST'])
+@app.route('/org/<slug>/users/delete/<int:uid>', methods=['POST'])
+@load_tenant
 @login_required
 @admin_required
-def delete_user(id):
-    if id == session.get('user_id'):
-        flash('لا يمكنك حذف حسابك الحالي', 'warning')
-        return redirect(url_for('users'))
-    user = User.query.get_or_404(id)
-    db.session.delete(user)
-    db.session.commit()
-    flash('تم حذف المستخدم', 'warning')
-    return redirect(url_for('users'))
+def delete_user(slug, uid):
+    if uid == session.get('user_id'):
+        flash('لا يمكنك حذف حسابك الحالي','warning')
+        return redirect(url_for('users', slug=slug))
+    t_execute("DELETE FROM users WHERE id=:id",{'id':uid})
+    flash('تم حذف المستخدم','warning')
+    return redirect(url_for('users', slug=slug))
 
-@app.route('/users/toggle/<int:id>', methods=['POST'])
+@app.route('/org/<slug>/users/toggle/<int:uid>', methods=['POST'])
+@load_tenant
 @login_required
 @admin_required
-def toggle_user(id):
-    if id == session.get('user_id'):
-        return jsonify({'success': False, 'message': 'لا يمكنك تعطيل حسابك الحالي'})
-    user = User.query.get_or_404(id)
-    user.is_active = not getattr(user, 'is_active', True)
-    db.session.commit()
-    return jsonify({'success': True, 'is_active': user.is_active})
+def toggle_user(slug, uid):
+    if uid == session.get('user_id'):
+        return jsonify({'success':False,'message':'لا يمكنك تعطيل حسابك الحالي'})
+    user = t_fetchone("SELECT * FROM users WHERE id=:id",{'id':uid})
+    new_val = 0 if user['is_active'] else 1
+    t_execute("UPDATE users SET is_active=:v WHERE id=:id",{'v':new_val,'id':uid})
+    return jsonify({'success':True,'is_active':bool(new_val)})
 
-# ─── API for charts ───────────────────────────────────────────────────────────
+# ─── Settings ─────────────────────────────────────────────────
 
-@app.route('/api/student_detail/<int:student_id>')
+@app.route('/org/<slug>/settings', methods=['GET','POST'])
+@load_tenant
 @login_required
-def api_student_detail(student_id):
-    student = Student.query.get_or_404(student_id)
-    date_from = request.args.get('date_from', '')
-    date_to = request.args.get('date_to', '')
+@admin_required
+def settings(slug):
+    s = t_fetchone("SELECT * FROM system_settings LIMIT 1")
+    if request.method == 'POST':
+        t_execute(
+            "UPDATE system_settings SET system_name=:n,system_subtitle=:s,school_name=:sn,school_year=:sy,admin_phone=:ap,updated_at=:u",
+            {'n':request.form.get('system_name','').strip(),
+             's':request.form.get('system_subtitle','').strip(),
+             'sn':request.form.get('school_name','').strip(),
+             'sy':request.form.get('school_year','').strip(),
+             'ap':request.form.get('admin_phone','').strip(),
+             'u':datetime.utcnow().isoformat()}
+        )
+        flash('تم حفظ الإعدادات بنجاح','success')
+        return redirect(url_for('settings', slug=slug))
+    sc = t_fetchone("SELECT COUNT(*) c FROM students")['c']
+    uc = t_fetchone("SELECT COUNT(*) c FROM users")['c']
+    ac = t_fetchone("SELECT COUNT(*) c FROM attendance")['c']
+    return render_template('settings.html', slug=slug, settings=s,
+                           students_count=sc, users_count=uc, attendance_count=ac)
 
-    query = Attendance.query.filter_by(student_id=student_id)
-    if date_from:
-        query = query.filter(Attendance.date >= datetime.strptime(date_from, '%Y-%m-%d').date())
-    if date_to:
-        query = query.filter(Attendance.date <= datetime.strptime(date_to, '%Y-%m-%d').date())
+# ─── API ──────────────────────────────────────────────────────
 
-    records = query.order_by(Attendance.date.desc()).all()
-
-    STATUS_AR = {'present': 'حاضر', 'absent': 'غائب', 'late': 'متأخر'}
-    days_list = []
-    for r in records:
-        days_list.append({
-            'date': r.date.strftime('%Y/%m/%d'),
-            'day_name': ARABIC_DAYS[r.date.weekday()],
-            'status': r.status,
-            'status_ar': STATUS_AR.get(r.status, r.status),
-            'note': r.note or ''
-        })
-
+@app.route('/org/<slug>/api/settings')
+@load_tenant
+@login_required
+def api_settings(slug):
+    s = t_fetchone("SELECT * FROM system_settings LIMIT 1")
     return jsonify({
-        'student': {
-            'name': student.name,
-            'grade': student.grade,
-            'parent_name': student.parent_name or '',
-            'parent_phone': student.parent_phone or '',
-        },
-        'records': days_list,
-        'summary': {
-            'total': len(records),
-            'present': sum(1 for r in records if r.status == 'present'),
-            'absent': sum(1 for r in records if r.status == 'absent'),
-            'late': sum(1 for r in records if r.status == 'late'),
-        }
+        'system_name':     s['system_name']     if s else '',
+        'system_subtitle': s['system_subtitle'] if s else '',
+        'school_name':     s['school_name']     if s else ''
     })
 
-@app.route('/api/weekly_stats')
+@app.route('/org/<slug>/api/notifications')
+@load_tenant
 @login_required
-def weekly_stats():
+def api_notifications(slug):
+    today  = date.today().isoformat()
+    absent = t_fetchone("SELECT COUNT(*) c FROM attendance WHERE date=:d AND status='absent'",{'d':today})['c']
+    late   = t_fetchone("SELECT COUNT(*) c FROM attendance WHERE date=:d AND status='late'",  {'d':today})['c']
+    total  = t_fetchone("SELECT COUNT(*) c FROM students")['c']
+    notes  = []
+    if absent > 0: notes.append({'type':'warning','title':'غياب اليوم',    'message':f'{absent} طالب غائب اليوم',  'icon':'absent'})
+    if late   > 0: notes.append({'type':'info',   'title':'تأخر اليوم',    'message':f'{late} طالب متأخر اليوم',   'icon':'late'})
+    notes.append(              {'type':'success', 'title':'الطلاب المسجلون','message':f'إجمالي {total} طالب في النظام','icon':'students'})
+    return jsonify({'notifications':notes,'count':sum(1 for n in notes if n['type'] in ('warning','danger'))})
+
+@app.route('/org/<slug>/api/student_detail/<int:sid>')
+@load_tenant
+@login_required
+def api_student_detail(slug, sid):
+    student = t_fetchone("SELECT * FROM students WHERE id=:id",{'id':sid})
+    if not student: return jsonify({'error':'not found'}),404
+    df  = request.args.get('date_from','')
+    dt  = request.args.get('date_to','')
+    sql = "SELECT * FROM attendance WHERE student_id=:s"
+    params = {'s':sid}
+    if df: sql += " AND date>=:df"; params['df'] = df
+    if dt: sql += " AND date<=:dt"; params['dt'] = dt
+    sql += " ORDER BY date DESC"
+    records   = t_fetchall(sql, params)
+    STATUS_AR = {'present':'حاضر','absent':'غائب','late':'متأخر'}
+    days_list = [{'date':r['date'],
+                  'day_name':ARABIC_DAYS[datetime.strptime(r['date'],'%Y-%m-%d').weekday()],
+                  'status':r['status'],'status_ar':STATUS_AR.get(r['status'],r['status']),
+                  'note':r['note'] or ''} for r in records]
+    return jsonify({'student':{'name':student['name'],'grade':student['grade'],
+                               'parent_name':student.get('parent_name',''),
+                               'parent_phone':student.get('parent_phone','')},
+                   'records':days_list,
+                   'summary':{'total':len(records),
+                              'present':sum(1 for r in records if r['status']=='present'),
+                              'absent': sum(1 for r in records if r['status']=='absent'),
+                              'late':   sum(1 for r in records if r['status']=='late')}})
+
+@app.route('/org/<slug>/api/weekly_stats')
+@load_tenant
+@login_required
+def weekly_stats(slug):
     from datetime import timedelta
     today = date.today()
     labels, presents, absents, lates = [], [], [], []
-    for i in range(6, -1, -1):
-        d = today - timedelta(days=i)
-        records = Attendance.query.filter_by(date=d).all()
-        labels.append(d.strftime('%a'))
-        presents.append(sum(1 for r in records if r.status == 'present'))
-        absents.append(sum(1 for r in records if r.status == 'absent'))
-        lates.append(sum(1 for r in records if r.status == 'late'))
-    return jsonify({'labels': labels, 'presents': presents, 'absents': absents, 'lates': lates})
+    for i in range(6,-1,-1):
+        d = (today - timedelta(days=i)).isoformat()
+        labels.append(d[-5:])
+        presents.append(t_fetchone("SELECT COUNT(*) c FROM attendance WHERE date=:d AND status='present'",{'d':d})['c'])
+        absents.append( t_fetchone("SELECT COUNT(*) c FROM attendance WHERE date=:d AND status='absent'", {'d':d})['c'])
+        lates.append(   t_fetchone("SELECT COUNT(*) c FROM attendance WHERE date=:d AND status='late'",   {'d':d})['c'])
+    return jsonify({'labels':labels,'presents':presents,'absents':absents,'lates':lates})
 
-# ─── Settings ─────────────────────────────────────────────────────────────────
+# ─── Backup / Restore ─────────────────────────────────────────
 
-@app.route('/settings', methods=['GET', 'POST'])
+@app.route('/org/<slug>/backup/export')
+@load_tenant
 @login_required
 @admin_required
-def settings():
-    s = SystemSettings.get()
-    if request.method == 'POST':
-        s.system_name = request.form.get('system_name', 'نظام إدارة الطلاب').strip()
-        s.system_subtitle = request.form.get('system_subtitle', 'Student Management System').strip()
-        s.school_name = request.form.get('school_name', '').strip()
-        s.school_year = request.form.get('school_year', '').strip()
-        s.admin_phone = request.form.get('admin_phone', '').strip()
-        s.updated_at = datetime.utcnow()
-        db.session.commit()
-        flash('تم حفظ الإعدادات بنجاح', 'success')
-        return redirect(url_for('settings'))
-    return render_template('settings.html', settings=s,
-                           students_count=Student.query.count(),
-                           users_count=User.query.count(),
-                           attendance_count=Attendance.query.count())
-
-@app.route('/api/settings')
-@login_required
-def api_settings():
-    s = SystemSettings.get()
-    return jsonify({
-        'system_name': s.system_name,
-        'system_subtitle': s.system_subtitle,
-        'school_name': s.school_name,
-    })
-
-# ─── Notifications ─────────────────────────────────────────────────────────────
-
-@app.route('/api/notifications')
-@login_required
-def api_notifications():
-    today = date.today()
-    notifications = []
-    # طلاب غائبون اليوم
-    today_absent = db.session.query(Student).join(Attendance).filter(
-        Attendance.date == today,
-        Attendance.status == 'absent'
-    ).count()
-    if today_absent > 0:
-        notifications.append({
-            'type': 'warning',
-            'title': 'غياب اليوم',
-            'message': f'{today_absent} طالب غائب اليوم',
-            'icon': 'absent'
-        })
-    # طلاب متأخرون اليوم
-    today_late = db.session.query(Student).join(Attendance).filter(
-        Attendance.date == today,
-        Attendance.status == 'late'
-    ).count()
-    if today_late > 0:
-        notifications.append({
-            'type': 'info',
-            'title': 'تأخر اليوم',
-            'message': f'{today_late} طالب متأخر اليوم',
-            'icon': 'late'
-        })
-    # إجمالي الطلاب
-    total = Student.query.count()
-    notifications.append({
-        'type': 'success',
-        'title': 'الطلاب المسجلون',
-        'message': f'إجمالي {total} طالب في النظام',
-        'icon': 'students'
-    })
-    return jsonify({'notifications': notifications, 'count': len([n for n in notifications if n['type'] in ('warning','danger')])})
-
-# ─── Backup & Restore ──────────────────────────────────────────────────────────
-
-@app.route('/backup/export')
-@login_required
-@admin_required
-def backup_export():
-    data = {
-        'export_date': datetime.utcnow().isoformat(),
-        'version': '1.2',
-        'settings': {},
-        'users': [],
-        'students': [],
-        'attendance': []
-    }
-    # Settings
-    s = SystemSettings.get()
-    data['settings'] = {
-        'system_name': s.system_name,
-        'system_subtitle': s.system_subtitle,
-        'school_name': s.school_name,
-        'school_year': s.school_year,
-        'admin_phone': s.admin_phone,
-    }
-    # Users
-    for u in User.query.all():
-        data['users'].append({
-            'id': u.id, 'username': u.username, 'password': u.password,
-            'name': u.name, 'role': u.role, 'permissions': u.permissions,
-            'is_active': u.is_active
-        })
-    # Students
-    for st in Student.query.all():
-        data['students'].append({
-            'id': st.id, 'name': st.name, 'grade': st.grade,
-            'semester': st.semester, 'student_phone': st.student_phone,
-            'parent_name': st.parent_name, 'parent_phone': st.parent_phone,
-            'attendance_days': st.attendance_days,
-            'created_at': st.created_at.isoformat() if st.created_at else None
-        })
-    # Attendance
-    for a in Attendance.query.all():
-        data['attendance'].append({
-            'id': a.id, 'student_id': a.student_id,
-            'date': a.date.isoformat(), 'status': a.status, 'note': a.note
-        })
-
-    json_bytes = json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8')
+def backup_export(slug):
+    s        = t_fetchone("SELECT * FROM system_settings LIMIT 1") or {}
+    users_d  = t_fetchall("SELECT * FROM users")
+    students_d = t_fetchall("SELECT * FROM students")
+    att_d    = t_fetchall("SELECT * FROM attendance")
+    data = {'export_date':datetime.utcnow().isoformat(),'version':'3.0',
+            'org_name':g.tenant.org_name,
+            'settings':s,'users':users_d,'students':students_d,'attendance':att_d}
     buf = io.BytesIO()
-    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr('backup.json', json_bytes)
+    with zipfile.ZipFile(buf,'w',zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr('backup.json', json.dumps(data, ensure_ascii=False, indent=2))
     buf.seek(0)
-    filename = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
-    return send_file(buf, mimetype='application/zip', as_attachment=True, download_name=filename)
+    return send_file(buf, mimetype='application/zip', as_attachment=True,
+                     download_name=f"backup_{slug}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip")
 
-@app.route('/backup/import', methods=['POST'])
+@app.route('/org/<slug>/backup/import', methods=['POST'])
+@load_tenant
 @login_required
 @admin_required
-def backup_import():
+def backup_import(slug):
     f = request.files.get('backup_file')
     if not f:
-        flash('لم يتم اختيار ملف', 'warning')
-        return redirect(url_for('settings'))
+        flash('لم يتم اختيار ملف','warning')
+        return redirect(url_for('settings', slug=slug))
     try:
         buf = io.BytesIO(f.read())
-        with zipfile.ZipFile(buf, 'r') as zf:
-            # البحث عن backup.json بغض النظر عن المسار داخل الـ zip
-            names = zf.namelist()
-            json_name = next((n for n in names if n.endswith('backup.json')), None)
-            if not json_name:
-                raise ValueError('لم يتم العثور على ملف backup.json داخل الأرشيف')
-            json_bytes = zf.read(json_name)
-        data = json.loads(json_bytes.decode('utf-8'))
-
-        # Restore settings
-        if 'settings' in data:
-            s = SystemSettings.get()
+        with zipfile.ZipFile(buf,'r') as zf:
+            name = next((n for n in zf.namelist() if n.endswith('backup.json')),None)
+            if not name: raise ValueError('ملف غير صالح')
+            data = json.loads(zf.read(name).decode('utf-8'))
+        if 'settings' in data and data['settings']:
             sd = data['settings']
-            s.system_name = sd.get('system_name', s.system_name)
-            s.system_subtitle = sd.get('system_subtitle', s.system_subtitle)
-            s.school_name = sd.get('school_name', s.school_name)
-            s.school_year = sd.get('school_year', s.school_year)
-            s.admin_phone = sd.get('admin_phone', s.admin_phone)
-
-        # Clear and restore attendance
-        Attendance.query.delete()
-        # Clear and restore students
-        Student.query.delete()
-        db.session.commit()
-
-        student_id_map = {}
-        for st in data.get('students', []):
-            new_st = Student(
-                name=st['name'], grade=st['grade'],
-                semester=st.get('semester', 'الأول'),
-                student_phone=st.get('student_phone', ''),
-                parent_name=st.get('parent_name', ''),
-                parent_phone=st.get('parent_phone', ''),
-                attendance_days=st.get('attendance_days', '[]')
+            t_execute("UPDATE system_settings SET system_name=:n,system_subtitle=:s,school_name=:sn,school_year=:sy,admin_phone=:ap",
+                {'n':sd.get('system_name',''),'s':sd.get('system_subtitle',''),
+                 'sn':sd.get('school_name',''),'sy':sd.get('school_year',''),'ap':sd.get('admin_phone','')})
+        t_execute("DELETE FROM attendance")
+        t_execute("DELETE FROM students")
+        sid_map = {}
+        for st in data.get('students',[]):
+            t_execute(
+                "INSERT INTO students (name,grade,semester,student_phone,parent_name,parent_phone,attendance_days,created_at) "
+                "VALUES (:n,:g,:se,:sp,:pn,:pp,:ad,:ca)",
+                {'n':st['name'],'g':st['grade'],'se':st.get('semester','الأول'),
+                 'sp':st.get('student_phone',''),'pn':st.get('parent_name',''),
+                 'pp':st.get('parent_phone',''),'ad':st.get('attendance_days','[]'),
+                 'ca':st.get('created_at','')}
             )
-            db.session.add(new_st)
-            db.session.flush()
-            student_id_map[st['id']] = new_st.id
-
-        for a in data.get('attendance', []):
-            new_sid = student_id_map.get(a['student_id'])
+            sid_map[st['id']] = t_last_id()
+        for a in data.get('attendance',[]):
+            new_sid = sid_map.get(a['student_id'])
             if new_sid:
-                att = Attendance(
-                    student_id=new_sid,
-                    date=datetime.strptime(a['date'], '%Y-%m-%d').date(),
-                    status=a['status'],
-                    note=a.get('note', '')
-                )
-                db.session.add(att)
-
-        db.session.commit()
-        flash(f"تم استيراد النسخة الاحتياطية بنجاح — {len(data.get('students',[]))} طالب و {len(data.get('attendance',[]))} سجل حضور", 'success')
+                t_execute("INSERT INTO attendance (student_id,date,status,note) VALUES (:s,:d,:st,:no)",
+                    {'s':new_sid,'d':a['date'],'st':a['status'],'no':a.get('note','')})
+        flash(f"تم الاستيراد — {len(data.get('students',[]))} طالب",'success')
     except Exception as e:
-        db.session.rollback()
-        flash(f'فشل الاستيراد: {str(e)}', 'warning')
-    return redirect(url_for('settings'))
+        flash(f'فشل الاستيراد: {str(e)}','warning')
+    return redirect(url_for('settings', slug=slug))
 
-# ─── Init DB ──────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+#  Error handlers
+# ══════════════════════════════════════════════════════════════
 
-def init_db():
+@app.errorhandler(404)
+def not_found(e):
+    return render_template('404.html'), 404
+
+# ══════════════════════════════════════════════════════════════
+#  Init
+# ══════════════════════════════════════════════════════════════
+
+def init_app():
     with app.app_context():
-        db.create_all()
-        # إضافة عمود attendance_days إذا لم يكن موجوداً
-        for col, typedef in [
-            ("attendance_days", "TEXT DEFAULT '[]'"),
-            ("semester", "TEXT DEFAULT 'الأول'"),
-            ("student_phone", "TEXT DEFAULT ''"),
-        ]:
-            try:
-                db.session.execute(db.text(f"ALTER TABLE student ADD COLUMN {col} {typedef}"))
-                db.session.commit()
-            except:
-                pass
-        for col, typedef in [
-            ("permissions", "TEXT DEFAULT '[]'"),
-            ("is_active", "INTEGER DEFAULT 1"),
-        ]:
-            try:
-                db.session.execute(db.text(f"ALTER TABLE user ADD COLUMN {col} {typedef}"))
-                db.session.commit()
-            except:
-                pass
-
-        # Create SystemSettings table columns if needed
-        try:
-            db.session.execute(db.text("ALTER TABLE system_settings ADD COLUMN school_year TEXT DEFAULT ''"))
-            db.session.execute(db.text("ALTER TABLE system_settings ADD COLUMN admin_phone TEXT DEFAULT ''"))
-            db.session.commit()
-        except:
-            pass
-        # Ensure settings row exists
-        SystemSettings.get()
-
-        if not User.query.filter_by(username='admin').first():
-            db.session.add(User(username='admin', password='admin123', name='المدير', role='admin'))
-            db.session.add(User(username='teacher', password='teacher123', name='المعلم أحمد', role='teacher'))
-        if Student.query.count() == 0:
-            sample = [
-                Student(name='محمد علي أحمد', grade='الصف الأول', parent_name='علي أحمد', parent_phone='0501234567', attendance_days='["السبت","الأحد","الاثنين","الثلاثاء","الأربعاء"]'),
-                Student(name='سارة خالد محمد', grade='الصف الأول', parent_name='خالد محمد', parent_phone='0507654321', attendance_days='["السبت","الأحد","الاثنين","الثلاثاء","الأربعاء"]'),
-                Student(name='عبدالله سالم', grade='الصف الثاني', parent_name='سالم عبدالله', parent_phone='0512345678', attendance_days='["الأحد","الثلاثاء","الخميس"]'),
-                Student(name='نورة فهد العتيبي', grade='الصف الثاني', parent_name='فهد العتيبي', parent_phone='0509876543', attendance_days='["السبت","الأحد","الاثنين","الثلاثاء","الأربعاء"]'),
-                Student(name='يوسف ناصر القحطاني', grade='الصف الثالث', parent_name='ناصر القحطاني', parent_phone='0551234567', attendance_days='["السبت","الاثنين","الأربعاء"]'),
-            ]
-            for s in sample:
-                db.session.add(s)
-        db.session.commit()
+        main_db.create_all()
 
 if __name__ == '__main__':
-    init_db()
-    port = int(os.environ.get('PORT', 5000))
-    debug = os.environ.get('FLASK_ENV', 'production') == 'development'
+    init_app()
+    port  = int(os.environ.get('PORT', 5000))
+    debug = os.environ.get('FLASK_ENV','production') == 'development'
     app.run(debug=debug, host='0.0.0.0', port=port)
 else:
-    # Called by gunicorn on Railway
-    init_db()
+    init_app()
