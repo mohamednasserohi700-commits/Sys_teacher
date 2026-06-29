@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>نظام إدارة الطلاب — ابدأ مجاناً</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --blue:#0070f2;--blue-dark:#0057c2;--blue-light:#e8f2ff;
+  --shell:#1c2127;--text:#32363a;--text-sec:#6a6d70;
+  --border:#d9dadb;--bg:#f5f6f7;
+  font-family:'IBM Plex Sans Arabic',sans-serif;
+}
+body{min-height:100vh;background:#0a0f1a;color:#fff;overflow-x:hidden}
+
+/* Nav */
+nav{
+  position:fixed;top:0;left:0;right:0;z-index:100;
+  background:rgba(10,15,26,.85);backdrop-filter:blur(12px);
+  border-bottom:1px solid rgba(255,255,255,.08);
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 32px;height:60px;
+}
+.nav-logo{display:flex;align-items:center;gap:10px}
+.nav-logo-3d{
+  width:44px;height:44px;display:flex;align-items:center;justify-content:center;flex-shrink:0;
+}
+.nav-logo-3d svg{width:44px;height:44px}
+.nav-logo-icon{
+  width:34px;height:34px;border-radius:8px;
+  background:linear-gradient(135deg,var(--blue),#00a5ff);
+  display:flex;align-items:center;justify-content:center;
+}
+.nav-logo-icon svg{width:18px;height:18px;color:#fff}
+.nav-logo-text{font-size:16px;font-weight:700;color:#fff}
+.nav-actions{display:flex;align-items:center;gap:12px}
+.nav-link{color:rgba(255,255,255,.7);font-size:14px;text-decoration:none;padding:6px 12px;border-radius:6px;transition:.15s}
+.nav-link:hover{color:#fff;background:rgba(255,255,255,.08)}
+.nav-btn{
+  background:var(--blue);color:#fff;font-size:14px;font-weight:600;
+  padding:8px 20px;border-radius:8px;text-decoration:none;
+  transition:.15s;border:none;cursor:pointer;font-family:inherit;
+}
+.nav-btn:hover{background:var(--blue-dark)}
+
+/* Hero */
+.hero{
+  min-height:100vh;display:flex;align-items:center;justify-content:center;
+  text-align:center;padding:100px 24px 60px;position:relative;
+}
+.hero-bg{
+  position:absolute;inset:0;overflow:hidden;pointer-events:none;
+  background:radial-gradient(ellipse 80% 50% at 50% 0%,rgba(0,112,242,.25) 0%,transparent 60%);
+}
+.hero-bg::after{
+  content:'';position:absolute;inset:0;
+  background:radial-gradient(ellipse 60% 40% at 70% 80%,rgba(0,165,255,.1) 0%,transparent 50%);
+}
+.hero-badge{
+  display:inline-flex;align-items:center;gap:6px;
+  background:rgba(0,112,242,.15);border:1px solid rgba(0,112,242,.4);
+  border-radius:20px;padding:6px 16px;color:rgba(255,255,255,.8);
+  font-size:12px;font-weight:500;letter-spacing:.04em;margin-bottom:28px;
+}
+.hero-badge-dot{width:6px;height:6px;border-radius:50%;background:#00c9ff;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.hero h1{font-size:clamp(36px,6vw,72px);font-weight:700;line-height:1.1;margin-bottom:20px}
+.hero h1 span{
+  background:linear-gradient(135deg,#00a5ff,var(--blue));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+}
+.hero-desc{font-size:18px;color:rgba(255,255,255,.6);max-width:560px;margin:0 auto 40px;line-height:1.7}
+.hero-cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.cta-primary{
+  background:linear-gradient(135deg,var(--blue),#0088ff);color:#fff;
+  font-size:16px;font-weight:600;padding:14px 32px;border-radius:10px;
+  text-decoration:none;transition:.2s;
+  box-shadow:0 4px 24px rgba(0,112,242,.4);
+}
+.cta-primary:hover{transform:translateY(-2px);box-shadow:0 8px 32px rgba(0,112,242,.5)}
+.cta-secondary{
+  background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.15);
+  font-size:16px;font-weight:500;padding:14px 32px;border-radius:10px;
+  text-decoration:none;transition:.2s;
+}
+.cta-secondary:hover{background:rgba(255,255,255,.12)}
+
+/* Features */
+.features{padding:80px 24px;max-width:1100px;margin:0 auto}
+.section-label{text-align:center;color:var(--blue);font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;margin-bottom:12px}
+.section-title{text-align:center;font-size:clamp(24px,4vw,40px);font-weight:700;margin-bottom:12px}
+.section-desc{text-align:center;color:rgba(255,255,255,.5);font-size:15px;max-width:500px;margin:0 auto 56px}
+.features-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px}
+.feat-card{
+  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);
+  border-radius:16px;padding:28px;transition:.2s;
+}
+.feat-card:hover{background:rgba(255,255,255,.07);border-color:rgba(0,112,242,.4);transform:translateY(-3px)}
+.feat-icon{
+  width:48px;height:48px;border-radius:12px;
+  background:rgba(0,112,242,.15);border:1px solid rgba(0,112,242,.3);
+  display:flex;align-items:center;justify-content:center;margin-bottom:16px;
+}
+.feat-icon svg{width:22px;height:22px;color:#00a5ff}
+.feat-card h3{font-size:17px;font-weight:600;margin-bottom:8px}
+.feat-card p{font-size:14px;color:rgba(255,255,255,.5);line-height:1.6}
+
+/* How it works */
+.how{padding:80px 24px;max-width:900px;margin:0 auto}
+.steps{display:flex;flex-direction:column;gap:0}
+.step{display:flex;gap:24px;align-items:flex-start;position:relative;padding-bottom:40px}
+.step:last-child{padding-bottom:0}
+.step:not(:last-child)::after{
+  content:'';position:absolute;right:19px;top:48px;bottom:0;
+  width:2px;background:rgba(0,112,242,.2);
+}
+.step-num{
+  width:40px;height:40px;border-radius:50%;flex-shrink:0;
+  background:linear-gradient(135deg,var(--blue),#0088ff);
+  display:flex;align-items:center;justify-content:center;
+  font-size:16px;font-weight:700;color:#fff;
+  box-shadow:0 4px 12px rgba(0,112,242,.4);
+}
+.step h3{font-size:18px;font-weight:600;margin-bottom:6px;padding-top:8px}
+.step p{font-size:14px;color:rgba(255,255,255,.5);line-height:1.6}
+
+/* CTA Section */
+.cta-section{
+  padding:80px 24px;text-align:center;
+  background:linear-gradient(135deg,rgba(0,112,242,.1),rgba(0,165,255,.05));
+  border-top:1px solid rgba(255,255,255,.06);
+  border-bottom:1px solid rgba(255,255,255,.06);
+}
+.cta-section h2{font-size:clamp(24px,4vw,40px);font-weight:700;margin-bottom:12px}
+.cta-section p{color:rgba(255,255,255,.5);font-size:16px;margin-bottom:32px}
+
+/* Footer */
+footer{padding:32px 24px;text-align:center;color:rgba(255,255,255,.3);font-size:13px}
+footer a{color:rgba(255,255,255,.5);text-decoration:none}
+
+/* Existing tenants login hint */
+.login-hint{
+  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);
+  border-radius:12px;padding:20px 28px;max-width:480px;margin:40px auto 0;
+}
+.login-hint p{font-size:14px;color:rgba(255,255,255,.5);margin-bottom:12px}
+.login-hint-form{display:flex;gap:8px;flex-wrap:wrap}
+.login-hint-input{
+  flex:1;min-width:180px;padding:10px 14px;
+  background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);
+  border-radius:8px;color:#fff;font-size:14px;font-family:inherit;
+  direction:ltr;
+}
+.login-hint-input::placeholder{color:rgba(255,255,255,.3)}
+.login-hint-input:focus{outline:none;border-color:var(--blue)}
+.login-hint-btn{
+  padding:10px 18px;background:var(--blue);color:#fff;
+  border:none;border-radius:8px;font-size:14px;font-weight:600;
+  cursor:pointer;font-family:inherit;transition:.15s;white-space:nowrap;
+}
+.login-hint-btn:hover{background:var(--blue-dark)}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-logo">
+    <div class="nav-logo-3d">
+      <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="wf" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#60a5fa"/><stop offset="100%" stop-color="#2563eb"/></linearGradient>
+          <linearGradient id="ws" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#1d4ed8"/><stop offset="100%" stop-color="#1e3a8a"/></linearGradient>
+          <linearGradient id="rt" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#93c5fd"/><stop offset="100%" stop-color="#3b82f6"/></linearGradient>
+          <linearGradient id="sg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#fde68a"/><stop offset="100%" stop-color="#f59e0b"/></linearGradient>
+        </defs>
+        <!-- Shadow -->
+        <ellipse cx="50" cy="90" rx="32" ry="5" fill="#1e3a8a" opacity="0.3"/>
+        <!-- Right side wall -->
+        <polygon points="72,82 88,73 88,43 72,52" fill="url(#ws)"/>
+        <!-- Front wall -->
+        <rect x="28" y="52" width="44" height="30" fill="url(#wf)"/>
+        <!-- Roof right -->
+        <polygon points="28,52 72,52 88,43 44,43" fill="#1d4ed8"/>
+        <!-- Roof top -->
+        <polygon points="34,43 44,35 56,35 72,43 44,43 34,43" fill="url(#rt)"/>
+        <!-- Pillars -->
+        <rect x="33" y="57" width="3" height="25" fill="#1d4ed8"/>
+        <rect x="47" y="57" width="3" height="25" fill="#1d4ed8"/>
+        <rect x="61" y="57" width="3" height="25" fill="#1d4ed8"/>
+        <!-- Windows -->
+        <rect x="36" y="58" width="9" height="7" fill="#bfdbfe" opacity="0.8" rx="1"/>
+        <rect x="50" y="58" width="9" height="7" fill="#bfdbfe" opacity="0.8" rx="1"/>
+        <!-- Door -->
+        <rect x="44" y="70" width="12" height="12" fill="#1e40af" rx="1"/>
+        <rect x="45" y="71" width="4" height="10" fill="#93c5fd" opacity="0.7"/>
+        <rect x="51" y="71" width="4" height="10" fill="#93c5fd" opacity="0.6"/>
+        <!-- Star -->
+        <polygon points="50,18 52,24 58,24 53,28 55,34 50,30 45,34 47,28 42,24 48,24" fill="url(#sg)"/>
+      </svg>
+    </div>
+    <span class="nav-logo-text">SysMakers</span>
+  </div>
+  <div class="nav-actions">
+    <a href="/register" class="nav-btn">أنشئ حسابك مجاناً</a>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="hero-bg"></div>
+  <div style="position:relative;z-index:1;width:100%">
+    <div class="hero-badge">
+      <div class="hero-badge-dot"></div>
+      نظام إدارة الطلاب والحضور
+    </div>
+    <h1>أدر مؤسستك التعليمية<br><span>بشكل احترافي</span></h1>
+    <p class="hero-desc">منصة متكاملة لإدارة الطلاب وتسجيل الحضور وإرسال التقارير — كل مؤسسة لها بيئتها المنفصلة وتحكمها الكامل</p>
+    <div class="hero-cta">
+      <a href="/register" class="cta-primary">
+        <svg style="width:17px;height:17px;display:inline;margin-left:6px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+        أنشئ مؤسستك الآن — مجاناً
+      </a>
+    </div>
+
+    <!-- Quick login for existing tenants -->
+    <div class="login-hint">
+      <p>لديك حساب مسبق؟ أدخل رمز مؤسستك للدخول</p>
+      <div class="login-hint-form">
+        <input class="login-hint-input" id="slugInput" type="text" placeholder="رمز-مؤسستك" dir="ltr">
+        <button class="login-hint-btn" onclick="goToTenant()">دخول ←</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Features -->
+<section class="features">
+  <div class="section-label">المميزات</div>
+  <h2 class="section-title">كل ما تحتاجه في مكان واحد</h2>
+  <p class="section-desc">نظام متكامل يغطي كل جوانب إدارة الطلاب والحضور</p>
+  <div class="features-grid">
+    <div class="feat-card">
+      <div class="feat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></div>
+      <h3>عزل تام لكل مؤسسة</h3>
+      <p>بيانات كل مؤسسة مخزّنة بشكل مستقل تماماً — لا تداخل ولا مشاركة بيانات</p>
+    </div>
+    <div class="feat-card">
+      <div class="feat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg></div>
+      <h3>تسجيل حضور ذكي</h3>
+      <p>حدّد أيام حضور كل طالب ودع النظام يصفّي القوائم تلقائياً كل يوم</p>
+    </div>
+    <div class="feat-card">
+      <div class="feat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></div>
+      <h3>تقارير واتساب فورية</h3>
+      <p>أرسل تقرير غياب الطالب لولي أمره مباشرة بنقرة واحدة عبر واتساب</p>
+    </div>
+    <div class="feat-card">
+      <div class="feat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div>
+      <h3>إدارة المستخدمين</h3>
+      <p>المدير يضيف معلمين وموظفين بصلاحيات مخصصة — تحكم كامل من لوحة واحدة</p>
+    </div>
+    <div class="feat-card">
+      <div class="feat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+      <h3>تقارير وإحصاءات</h3>
+      <p>استعرض إحصاءات الحضور والغياب مع فلاتر متقدمة بالتاريخ والصف</p>
+    </div>
+    <div class="feat-card">
+      <div class="feat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+      <h3>نسخ احتياطية</h3>
+      <p>صدّر بياناتك كاملاً بضغطة واحدة واستوردها متى تريد — بياناتك ملكك</p>
+    </div>
+  </div>
+</section>
+
+<!-- How it works -->
+<section class="how">
+  <div class="section-label">كيف يعمل</div>
+  <h2 class="section-title" style="text-align:center;margin-bottom:12px">ابدأ في 3 خطوات</h2>
+  <p class="section-desc" style="text-align:center;color:rgba(255,255,255,.5);font-size:15px;max-width:500px;margin:0 auto 56px">بدون تكوين معقد — فقط سجّل وابدأ</p>
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div>
+        <h3>أنشئ حساب مؤسستك</h3>
+        <p>سجّل باسم مؤسستك وبريدك وكلمة مرور — تحصل فوراً على رابط خاص بمؤسستك</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div>
+        <h3>أضف طلابك ومستخدميك</h3>
+        <p>ادخل بياناتك كمدير وأضف الطلاب والمعلمين الآخرين بالصلاحيات المناسبة لكل منهم</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div>
+        <h3>ابدأ التشغيل</h3>
+        <p>سجّل الحضور يومياً، استعرض التقارير، وتواصل مع أولياء الأمور عبر واتساب مباشرة</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-section">
+  <h2>ابدأ الآن مجاناً</h2>
+  <p>لا بطاقة ائتمانية — لا تكوين معقد — فقط أنشئ مؤسستك وابدأ</p>
+  <a href="/register" class="cta-primary">أنشئ مؤسستك الآن ←</a>
+</section>
+
+<footer>
+  <p>نظام إدارة الطلاب &copy; 2024 — <a href="/register">إنشاء حساب</a></p>
+</footer>
+
+<script>
+function goToTenant(){
+  const slug = document.getElementById('slugInput').value.trim().toLowerCase();
+  if(!slug){ alert('أدخل رمز المؤسسة أولاً'); return; }
+  window.location.href = '/org/' + slug + '/login';
+}
+document.getElementById('slugInput').addEventListener('keydown', e=>{
+  if(e.key === 'Enter') goToTenant();
+});
+</script>
+</body>
+</html>

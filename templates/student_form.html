@@ -39,7 +39,7 @@
     <div class="page-title">{% if action=='add' %}تسجيل طالب جديد{% else %}تعديل: {{ student.name }}{% endif %}</div>
     <div class="page-subtitle">{% if action=='add' %}أدخل بيانات الطالب وحدد أيام حضوره{% else %}تعديل البيانات الأساسية وأيام الحضور{% endif %}</div>
   </div>
-  <a href="/students" class="btn btn-secondary">
+  <a href="/org/{{ slug }}/students" class="btn btn-secondary">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
     رجوع
   </a>
@@ -133,7 +133,7 @@
         </label>
         <div class="days-section">
           <div class="days-grid">
-            {% set selected_days = student.get_attendance_days() if student else [] %}
+            {% set selected_days = student.attendance_days_list if student else [] %}
             {% set day_icons = {'السبت':'🟦','الأحد':'🟩','الاثنين':'🟨','الثلاثاء':'🟧','الأربعاء':'🟪','الخميس':'🟫','الجمعة':'🟥'} %}
             {% for day in all_days %}
             <div>
@@ -162,7 +162,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
           {% if action=='add' %}تسجيل الطالب{% else %}حفظ التعديلات{% endif %}
         </button>
-        <a href="/students" class="btn btn-secondary">إلغاء</a>
+        <a href="/org/{{ slug }}/students" class="btn btn-secondary">إلغاء</a>
       </div>
     </form>
   </div>

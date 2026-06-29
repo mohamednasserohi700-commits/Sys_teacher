@@ -20,7 +20,7 @@
       </div>
     </div>
     <div class="card-body">
-      <form method="POST" action="/settings">
+      <form method="POST" action="/org/{{ slug }}/settings">
         <div class="form-row cols-2">
           <div class="form-group">
             <label class="form-label">اسم النظام <span class="required">*</span></label>
@@ -65,7 +65,7 @@
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
             حفظ الإعدادات
           </button>
-          <a href="/dashboard" class="btn btn-secondary">إلغاء</a>
+          <a href="/org/{{ slug }}/dashboard" class="btn btn-secondary">إلغاء</a>
         </div>
       </form>
     </div>

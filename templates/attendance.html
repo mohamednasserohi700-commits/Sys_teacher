@@ -65,7 +65,7 @@
   <div>
     <div class="page-title">تسجيل الحضور والغياب</div>
     <div class="page-subtitle">
-      {{ att_date.strftime('%A %d/%m/%Y') }}
+      {{ att_date | format_date('%A %d/%m/%Y') }}
       &nbsp;•&nbsp;
       <span class="day-badge">📅 {{ day_name }}</span>
     </div>
@@ -137,7 +137,7 @@
       <tbody>
         {% for s in students %}
         {% set rec = existing.get(s.id) %}
-        {% set s_days = s.get_attendance_days() %}
+        {% set s_days = s.attendance_days_list %}
         <tr class="att-row" data-id="{{ s.id }}" data-status="{{ rec.status if rec else '' }}">
           <td style="color:var(--fiori-text-secondary);font-size:12px">{{ loop.index }}</td>
           <td>
@@ -251,13 +251,13 @@ function applyFilter() {
   const d = document.getElementById('attDate').value;
   const g = document.getElementById('gradeSelect').value;
   const showAll = {{ 'true' if show_all else 'false' }};
-  window.location = '/attendance?date=' + d + '&grade=' + encodeURIComponent(g) + (showAll ? '&show_all=1' : '');
+  window.location = '/org/{{ slug }}/attendance?date=' + d + '&grade=' + encodeURIComponent(g) + (showAll ? '&show_all=1' : '');
 }
 
 function toggleShowAll(val) {
   const d = document.getElementById('attDate').value;
   const g = document.getElementById('gradeSelect').value;
-  window.location = '/attendance?date=' + d + '&grade=' + encodeURIComponent(g) + (val ? '&show_all=1' : '');
+  window.location = '/org/{{ slug }}/attendance?date=' + d + '&grade=' + encodeURIComponent(g) + (val ? '&show_all=1' : '');
 }
 
 function saveAttendance() {
@@ -274,7 +274,7 @@ function saveAttendance() {
   if(!records.length) { alert('يرجى تحديد حالة حضور لطالب واحد على الأقل'); return; }
 
   const date = document.getElementById('attDate').value;
-  fetch('/attendance/save', {
+  fetch('{{ url_for("save_attendance", slug=slug) }}', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({date, records})

@@ -171,6 +171,15 @@ body{min-height:100vh;background:var(--bg);display:flex;flex-direction:column}
   letter-spacing:.12em;white-space:nowrap;
   font-family:'IBM Plex Sans Arabic',sans-serif;
 }
+
+.success-banner{
+  background:#f0fdf4;border:1px solid #86efac;border-radius:8px;
+  padding:12px 14px;margin-bottom:20px;
+  display:flex;align-items:flex-start;gap:10px;color:#166534;
+}
+.success-banner svg{width:18px;height:18px;flex-shrink:0;margin-top:1px;color:#16a34a}
+.success-banner-title{font-size:13px;font-weight:600;margin-bottom:4px}
+.success-banner-detail{font-size:12px;direction:ltr;font-weight:500;color:#15803d;word-break:break-all}
 </style>
 </head>
 <body>
@@ -180,7 +189,7 @@ body{min-height:100vh;background:var(--bg);display:flex;flex-direction:column}
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
   </div>
   <div>
-    <div class="top-bar-title">نظام إدارة الطلاب</div>
+    <div class="top-bar-title">{{ org_name or 'نظام إدارة الطلاب' }}</div>
   </div>
 </div>
 
@@ -222,8 +231,25 @@ body{min-height:100vh;background:var(--bg);display:flex;flex-direction:column}
       <div class="form-logo">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
       </div>
-      <h2 class="form-h2">أهلاً بك</h2>
+      <h2 class="form-h2">{{ org_name or 'أهلاً بك' }}</h2>
       <p class="form-sub">سجّل دخولك للمتابعة</p>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for cat, msg in messages %}
+          {% set parts = msg.split(' | ') %}
+          <div class="success-banner">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+            <div class="success-banner-body">
+              <div class="success-banner-title">{{ parts[0] }}</div>
+              {% if parts|length > 1 %}
+                {% for part in parts[1:] %}
+                  <div class="success-banner-detail">{{ part }}</div>
+                {% endfor %}
+              {% endif %}
+            </div>
+          </div>
+        {% endfor %}
+      {% endwith %}
 
       {% if error %}
       <div class="error-msg">
@@ -253,6 +279,11 @@ body{min-height:100vh;background:var(--bg);display:flex;flex-direction:column}
         </button>
       </form>
 
+      <div style="margin-top:24px;text-align:center;font-size:13px;color:var(--text-sec)">
+        <a href="/" style="color:var(--text-sec);text-decoration:none">← الصفحة الرئيسية</a>
+        &nbsp;·&nbsp;
+        <a href="/register" style="color:var(--blue);text-decoration:none;font-weight:500">إنشاء مؤسسة جديدة</a>
+      </div>
 
     </div>
 

@@ -50,7 +50,7 @@
     <div class="page-title">{% if action=='add' %}إضافة مستخدم جديد{% else %}تعديل: {{ user.name }}{% endif %}</div>
     <div class="page-subtitle">{% if action=='add' %}أدخل بيانات المستخدم وحدد صلاحياته{% else %}تعديل بيانات وصلاحيات المستخدم{% endif %}</div>
   </div>
-  <a href="/users" class="btn btn-secondary">
+  <a href="/org/{{ slug }}/users" class="btn btn-secondary">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
     رجوع
   </a>
@@ -154,7 +154,7 @@
                 'reports': '📊',
                 'manage_users': '👥'
               } %}
-              {% set user_perms = user.get_permissions() if user else [] %}
+              {% set user_perms = user.permissions_list if user else [] %}
               {% for key, label in permissions.items() %}
               <div>
                 <input type="checkbox" class="perm-check" name="permissions"
@@ -176,7 +176,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>
           {% if action=='add' %}إضافة المستخدم{% else %}حفظ التعديلات{% endif %}
         </button>
-        <a href="/users" class="btn btn-secondary">إلغاء</a>
+        <a href="/org/{{ slug }}/users" class="btn btn-secondary">إلغاء</a>
       </div>
     </form>
   </div>

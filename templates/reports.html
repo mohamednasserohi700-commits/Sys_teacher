@@ -139,7 +139,7 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         تطبيق الفلتر
       </button>
-      <a href="/reports" class="btn btn-secondary">إعادة تعيين</a>
+      <a href="/org/{{ slug }}/reports" class="btn btn-secondary">إعادة تعيين</a>
     </div>
   </div>
 </div>
@@ -194,7 +194,7 @@
         </tr>
       </thead>
       <tbody>
-        {% for student, total, absences, lates, presents in results %}
+        {% for r in results %}{% set student = r %}{% set total = r.total %}{% set absences = r.absences %}{% set lates = r.lates %}{% set presents = r.presents %}
         {% set pct = ((presents or 0) / total * 100)|int if total else 0 %}
         <tr>
           <td>
@@ -238,7 +238,7 @@
           <td>
             {% if student.parent_phone %}
             <a class="wa-btn"
-              href="/send_whatsapp/{{ student.id }}?date_from={{ date_from }}&date_to={{ date_to }}"
+              href="/org/{{ slug }}/send_whatsapp/{{ student.id }}?date_from={{ date_from }}&date_to={{ date_to }}"
               target="_blank">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
               إرسال
@@ -258,7 +258,7 @@
   <div class="empty-state">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
     <p>لا توجد بيانات حضور حتى الآن</p>
-    <a href="/attendance" class="btn btn-primary" style="margin-top:16px">ابدأ تسجيل الحضور</a>
+    <a href="/org/{{ slug }}/attendance" class="btn btn-primary" style="margin-top:16px">ابدأ تسجيل الحضور</a>
   </div>
 </div>
 {% endif %}
@@ -306,7 +306,7 @@ function showDetail(studentId, studentName) {
   if(df) params.set('date_from', df);
   if(dt) params.set('date_to', dt);
 
-  fetch(`/api/student_detail/${studentId}?${params}`)
+  fetch(`/org/{{ slug }}/api/student_detail/${studentId}?${params}`)
     .then(r => r.json())
     .then(data => {
       allRecords = data.records;
@@ -375,13 +375,13 @@ function applyFilters(){
   const df = document.getElementById('dateFrom').value;
   const dt = document.getElementById('dateTo').value;
   const sf = '{{ status_filter }}';
-  window.location = `/reports?grade=${encodeURIComponent(g)}&date_from=${df}&date_to=${dt}&status_filter=${sf}`;
+  window.location = `/org/{{ slug }}/reports?grade=${encodeURIComponent(g)}&date_from=${df}&date_to=${dt}&status_filter=${sf}`;
 }
 function filterStatus(status){
   const g = document.getElementById('gradeFilter').value;
   const df = document.getElementById('dateFrom').value;
   const dt = document.getElementById('dateTo').value;
-  window.location = `/reports?grade=${encodeURIComponent(g)}&date_from=${df}&date_to=${dt}&status_filter=${status}`;
+  window.location = `/org/{{ slug }}/reports?grade=${encodeURIComponent(g)}&date_from=${df}&date_to=${dt}&status_filter=${status}`;
 }
 </script>
 {% endblock %}
