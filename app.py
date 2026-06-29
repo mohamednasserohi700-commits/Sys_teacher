@@ -559,8 +559,8 @@ def send_whatsapp(slug, sid):
     msg += "━━━━━━━━━━━━━━━━━━\n🏫 إدارة المدرسة"
 
     phone = (student['parent_phone'] or '').replace(' ','').replace('-','').replace('+','')
-    if phone.startswith('0'): phone = '966' + phone[1:]
-    if not phone.startswith('966'): phone = '966' + phone
+    if phone.startswith('0'): phone = '20' + phone[1:]
+    if not phone.startswith('20'): phone = '20' + phone
     return redirect(f"https://wa.me/{phone}?text={urllib.parse.quote(msg)}")
 
 # ─── Users ────────────────────────────────────────────────────
