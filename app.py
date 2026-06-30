@@ -8,12 +8,19 @@ from flask import Flask, render_template, request, redirect, url_for, session, j
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import scoped_session, sessionmaker, declarative_base
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from functools import wraps
-import json, urllib.parse, os, io, zipfile, re
+import json, urllib.parse, os, io, zipfile, re, secrets
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'multitenant_secret_2024_change_in_prod')
+
+# ══════════════════════════════════════════════════════════════
+#  حساب مطور النظام (مخفي تماماً - غير موجود في أي قاعدة بيانات)
+#  لا يظهر لأي مؤسسة ولا لأي مستخدم أو أدمن عادي
+# ══════════════════════════════════════════════════════════════
+DEVELOPER_USERNAME = os.environ.get('DEVELOPER_USERNAME', 'administrator')
+DEVELOPER_PASSWORD = os.environ.get('DEVELOPER_PASSWORD', '3000330210')
 
 @app.template_filter('format_date')
 def format_date_filter(value, fmt='%Y/%m/%d'):
@@ -56,12 +63,40 @@ class Tenant(main_db.Model):
     org_name      = main_db.Column(main_db.String(200), nullable=False)
     owner_name    = main_db.Column(main_db.String(100), nullable=False)
     owner_email   = main_db.Column(main_db.String(150), unique=True, nullable=False)
+    owner_phone   = main_db.Column(main_db.String(20), nullable=True)
     owner_password= main_db.Column(main_db.String(200), nullable=False)
     is_active     = main_db.Column(main_db.Boolean, default=True)
+    subscription_until = main_db.Column(main_db.DateTime, nullable=True)
     created_at    = main_db.Column(main_db.DateTime, default=datetime.utcnow)
+
+    def is_subscribed(self):
+        return bool(self.subscription_until and self.subscription_until > datetime.utcnow())
 
     def db_path(self):
         return os.path.join(TENANTS_DIR, f'{self.slug}.db')
+
+
+# ══════════════════════════════════════════════════════════════
+#  حدود الباقة المجانية + باقات الاشتراك
+# ══════════════════════════════════════════════════════════════
+FREE_PLAN_MAX_USERS    = 3
+FREE_PLAN_MAX_STUDENTS = 15
+SUBSCRIPTION_WHATSAPP  = '01103763082'
+SUBSCRIPTION_PLANS = [
+    {'months': 6,  'price': 3000, 'label': '6 أشهر'},
+    {'months': 12, 'price': 5500, 'label': 'سنة كاملة'},
+]
+
+
+class SubscriptionCode(main_db.Model):
+    __tablename__ = 'subscription_codes'
+    id         = main_db.Column(main_db.Integer, primary_key=True)
+    code       = main_db.Column(main_db.String(40), unique=True, nullable=False)
+    slug       = main_db.Column(main_db.String(60), nullable=False)   # المؤسسة المرتبط بها الكود
+    months     = main_db.Column(main_db.Integer, nullable=False)
+    is_used    = main_db.Column(main_db.Boolean, default=False)
+    used_at    = main_db.Column(main_db.DateTime, nullable=True)
+    created_at = main_db.Column(main_db.DateTime, default=datetime.utcnow)
 
 # ══════════════════════════════════════════════════════════════
 #  جلسات قواعد بيانات المؤسسات (ديناميكية)
@@ -218,6 +253,15 @@ def load_tenant(f):
         s = t_fetchone("SELECT * FROM system_settings LIMIT 1")
         g.sys_name     = s['system_name']     if s else 'نظام إدارة الطلاب'
         g.sys_subtitle = s['system_subtitle'] if s else 'Student Management System'
+        # حالة الاشتراك وحدود الباقة المجانية
+        g.is_subscribed = tenant.is_subscribed()
+        g.subscription_until = tenant.subscription_until
+        if not g.is_subscribed:
+            users_count    = t_fetchone("SELECT COUNT(*) AS c FROM users")['c']
+            students_count = t_fetchone("SELECT COUNT(*) AS c FROM students")['c']
+            g.limit_reached = (users_count >= FREE_PLAN_MAX_USERS) or (students_count >= FREE_PLAN_MAX_STUDENTS)
+        else:
+            g.limit_reached = False
         return f(*args, **kwargs)
     return decorated
 
@@ -235,6 +279,15 @@ def admin_required(f):
         if session.get('user_role') != 'admin':
             flash('هذه الصفحة للمديرين فقط', 'warning')
             return redirect(url_for('dashboard', slug=kwargs.get('slug','')))
+        return f(*args, **kwargs)
+    return decorated
+
+def developer_required(f):
+    """صفحات مطور النظام - مخفية تماماً، تُرجع 404 لأي شخص غير مسجل دخوله كمطور."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get('is_developer'):
+            return render_template('404.html'), 404
         return f(*args, **kwargs)
     return decorated
 
@@ -269,25 +322,34 @@ def register():
         slug_raw  = request.form.get('slug','').strip().lower()
         slug      = re.sub(r'[^a-z0-9_]', '', slug_raw)
         owner     = request.form.get('owner_name','').strip()
+        owner_phone = re.sub(r'[^0-9]', '', request.form.get('owner_phone','').strip())
         email_username = re.sub(r'[^a-z0-9._-]', '', request.form.get('email_username','').strip().lower())
         email     = email_username + '@sysmakers.com' if email_username else ''
         password  = request.form.get('password','').strip()
         password2 = request.form.get('password2','').strip()
 
-        if not all([org_name, slug, owner, email, password]):
+        MAX_TENANTS_PER_PHONE = 2
+
+        if not all([org_name, slug, owner, owner_phone, email, password]):
             error = 'يرجى تعبئة جميع الحقول'
+        elif len(owner_phone) < 8:
+            error = 'رقم الهاتف غير صحيح'
         elif len(slug) < 3:
             error = 'رمز المؤسسة يجب أن يكون 3 أحرف على الأقل'
         elif password != password2:
             error = 'كلمتا المرور غير متطابقتين'
         elif len(password) < 6:
             error = 'كلمة المرور يجب أن تكون 6 أحرف على الأقل'
+        elif slug == 'administrator':
+            error = 'رمز المؤسسة غير متاح، اختر رمزاً آخر'
+        elif Tenant.query.filter_by(owner_phone=owner_phone).count() >= MAX_TENANTS_PER_PHONE:
+            error = 'تعذر إتمام عملية التسجيل، يرجى المحاولة لاحقاً أو التواصل مع الدعم الفني'
         elif Tenant.query.filter_by(slug=slug).first():
             error = 'رمز المؤسسة مستخدم، اختر رمزاً آخر'
         elif Tenant.query.filter_by(owner_email=email).first():
             error = 'البريد الإلكتروني مسجل مسبقاً'
         else:
-            tenant = Tenant(slug=slug, org_name=org_name, owner_name=owner,
+            tenant = Tenant(slug=slug, org_name=org_name, owner_name=owner, owner_phone=owner_phone,
                             owner_email=email, owner_password=password)
             main_db.session.add(tenant)
             main_db.session.commit()
@@ -369,6 +431,11 @@ def students(slug):
 @load_tenant
 @login_required
 def add_student(slug):
+    if not g.is_subscribed:
+        count = t_fetchone("SELECT COUNT(*) AS c FROM students")['c']
+        if count >= FREE_PLAN_MAX_STUDENTS:
+            flash(f'وصلت للحد الأقصى لعدد الطلاب ({FREE_PLAN_MAX_STUDENTS}) في الباقة المجانية، يرجى الاشتراك لإضافة المزيد', 'warning')
+            return redirect(url_for('settings', slug=slug))
     if request.method == 'POST':
         days = json.dumps(request.form.getlist('attendance_days'), ensure_ascii=False)
         t_execute(
@@ -559,8 +626,8 @@ def send_whatsapp(slug, sid):
     msg += "━━━━━━━━━━━━━━━━━━\n🏫 إدارة المدرسة"
 
     phone = (student['parent_phone'] or '').replace(' ','').replace('-','').replace('+','')
-    if phone.startswith('0'): phone = '20' + phone[1:]
-    if not phone.startswith('20'): phone = '20' + phone
+    if phone.startswith('0'): phone = '966' + phone[1:]
+    if not phone.startswith('966'): phone = '966' + phone
     return redirect(f"https://wa.me/{phone}?text={urllib.parse.quote(msg)}")
 
 # ─── Users ────────────────────────────────────────────────────
@@ -580,6 +647,11 @@ def users(slug):
 @login_required
 @admin_required
 def add_user(slug):
+    if not g.is_subscribed:
+        count = t_fetchone("SELECT COUNT(*) AS c FROM users")['c']
+        if count >= FREE_PLAN_MAX_USERS:
+            flash(f'وصلت للحد الأقصى لعدد المستخدمين ({FREE_PLAN_MAX_USERS}) في الباقة المجانية، يرجى الاشتراك لإضافة المزيد', 'warning')
+            return redirect(url_for('settings', slug=slug))
     if request.method == 'POST':
         username = request.form['username'].strip()
         if t_fetchone("SELECT id FROM users WHERE username=:u",{'u':username}):
@@ -656,6 +728,19 @@ def toggle_user(slug, uid):
 def settings(slug):
     s = t_fetchone("SELECT * FROM system_settings LIMIT 1")
     if request.method == 'POST':
+        if request.form.get('form_type') == 'activate_subscription':
+            code_str = request.form.get('activation_code','').strip().upper()
+            sub_code = SubscriptionCode.query.filter_by(code=code_str, slug=slug, is_used=False).first()
+            if not sub_code:
+                flash('الكود غير صحيح أو غير صالح لهذه المؤسسة', 'danger')
+            else:
+                base = g.tenant.subscription_until if g.tenant.is_subscribed() else datetime.utcnow()
+                g.tenant.subscription_until = base + timedelta(days=30 * sub_code.months)
+                sub_code.is_used = True
+                sub_code.used_at = datetime.utcnow()
+                main_db.session.commit()
+                flash(f'تم تفعيل الاشتراك بنجاح لمدة {sub_code.months} شهر', 'success')
+            return redirect(url_for('settings', slug=slug))
         t_execute(
             "UPDATE system_settings SET system_name=:n,system_subtitle=:s,school_name=:sn,school_year=:sy,admin_phone=:ap,updated_at=:u",
             {'n':request.form.get('system_name','').strip(),
@@ -671,7 +756,10 @@ def settings(slug):
     uc = t_fetchone("SELECT COUNT(*) c FROM users")['c']
     ac = t_fetchone("SELECT COUNT(*) c FROM attendance")['c']
     return render_template('settings.html', slug=slug, settings=s,
-                           students_count=sc, users_count=uc, attendance_count=ac)
+                           students_count=sc, users_count=uc, attendance_count=ac,
+                           is_subscribed=g.is_subscribed, subscription_until=g.tenant.subscription_until,
+                           free_max_users=FREE_PLAN_MAX_USERS, free_max_students=FREE_PLAN_MAX_STUDENTS,
+                           subscription_plans=SUBSCRIPTION_PLANS, whatsapp_number=SUBSCRIPTION_WHATSAPP)
 
 # ─── API ──────────────────────────────────────────────────────
 
@@ -811,9 +899,104 @@ def backup_import(slug):
 #  Error handlers
 # ══════════════════════════════════════════════════════════════
 
-@app.errorhandler(404)
-def not_found(e):
-    return render_template('404.html'), 404
+# ══════════════════════════════════════════════════════════════
+#  مطور النظام — صفحات مخفية (غير مرتبطة بأي رابط في الواجهة)
+#  الدخول من: /system/developer-login
+# ══════════════════════════════════════════════════════════════
+
+@app.route('/system/developer-login', methods=['GET','POST'])
+def developer_login():
+    error = None
+    if request.method == 'POST':
+        u = request.form.get('username','').strip()
+        p = request.form.get('password','').strip()
+        if u == DEVELOPER_USERNAME and p == DEVELOPER_PASSWORD:
+            session.clear()
+            session['is_developer'] = True
+            session['dev_name']     = 'حسام'
+            return redirect(url_for('developer_dashboard'))
+        error = 'بيانات الدخول غير صحيحة'
+    return render_template('developer_login.html', error=error)
+
+@app.route('/system/developer-logout')
+def developer_logout():
+    session.clear()
+    return redirect(url_for('developer_login'))
+
+@app.route('/system/developer-dashboard')
+@developer_required
+def developer_dashboard():
+    tenants = Tenant.query.order_by(Tenant.created_at.desc()).all()
+    return render_template('developer_dashboard.html', tenants=tenants)
+
+@app.route('/system/developer-toggle/<slug>', methods=['POST'])
+@developer_required
+def developer_toggle_tenant(slug):
+    tenant = Tenant.query.filter_by(slug=slug).first()
+    if tenant:
+        tenant.is_active = not tenant.is_active
+        main_db.session.commit()
+        return jsonify({'success': True, 'is_active': tenant.is_active})
+    return jsonify({'success': False}), 404
+
+@app.route('/system/developer-delete/<slug>', methods=['POST'])
+@developer_required
+def developer_delete_tenant(slug):
+    tenant = Tenant.query.filter_by(slug=slug).first()
+    if not tenant:
+        return jsonify({'success': False}), 404
+    # حذف أكواد الاشتراك المرتبطة بالمؤسسة
+    SubscriptionCode.query.filter_by(slug=slug).delete()
+    # حذف ملف قاعدة بيانات المؤسسة لو موجود
+    db_path = tenant.db_path()
+    _tenant_engines.pop(slug, None)
+    _tenant_sessions.pop(slug, None)
+    if os.path.exists(db_path):
+        try:
+            os.remove(db_path)
+        except Exception:
+            pass
+    main_db.session.delete(tenant)
+    main_db.session.commit()
+    return jsonify({'success': True})
+
+@app.route('/system/developer-subscriptions', methods=['GET','POST'])
+@developer_required
+def developer_subscriptions():
+    if request.method == 'POST':
+        slug   = request.form.get('slug','').strip()
+        months = int(request.form.get('months', 0) or 0)
+        tenant = Tenant.query.filter_by(slug=slug).first()
+        if not tenant or months <= 0:
+            flash('بيانات غير صحيحة', 'danger')
+        else:
+            code = secrets.token_hex(4).upper()
+            sc = SubscriptionCode(code=code, slug=slug, months=months)
+            main_db.session.add(sc)
+            main_db.session.commit()
+            flash(f'تم إنشاء الكود: {code} لمؤسسة {tenant.org_name} لمدة {months} شهر', 'success')
+        return redirect(url_for('developer_subscriptions'))
+    tenants = Tenant.query.order_by(Tenant.org_name).all()
+    codes   = SubscriptionCode.query.order_by(SubscriptionCode.created_at.desc()).all()
+    tenant_map = {t.slug: t for t in tenants}
+    return render_template('developer_subscriptions.html', tenants=tenants, codes=codes, tenant_map=tenant_map)
+
+
+@app.route('/system/developer-enter/<slug>')
+@developer_required
+def developer_enter(slug):
+    """يفتح أي مؤسسة كأنه أدمن فيها، دون أن يظهر كمستخدم في قاعدة بيانات المؤسسة."""
+    tenant = Tenant.query.filter_by(slug=slug).first()
+    if not tenant:
+        return render_template('404.html'), 404
+    session['user_id']     = 0
+    session['user_name']   = 'حسام (مطور النظام)'
+    session['user_role']   = 'admin'
+    session['tenant_slug'] = slug
+    session['is_developer']= True
+    return redirect(url_for('dashboard', slug=slug))
+
+
 
 # ══════════════════════════════════════════════════════════════
 #  Init
@@ -822,6 +1005,36 @@ def not_found(e):
 def init_app():
     with app.app_context():
         main_db.create_all()
+        # ترقية قاعدة البيانات الرئيسية: إضافة عمود owner_phone لو مش موجود
+        try:
+            with main_db.engine.connect() as conn:
+                conn.execute(text("ALTER TABLE tenants ADD COLUMN owner_phone VARCHAR(20)"))
+                conn.commit()
+        except Exception:
+            pass  # العمود موجود بالفعل
+        try:
+            with main_db.engine.connect() as conn:
+                conn.execute(text("ALTER TABLE tenants ADD COLUMN subscription_until DATETIME"))
+                conn.commit()
+        except Exception:
+            pass  # العمود موجود بالفعل
+        # ترقية قواعد بيانات المؤسسات القديمة: إضافة أي جداول ناقصة
+        # (مثل system_settings) من غير ما نلمس بياناتها الحالية
+        try:
+            tenants = Tenant.query.all()
+        except Exception:
+            tenants = []
+        for t in tenants:
+            try:
+                engine = get_tenant_engine(t.slug)
+                with engine.connect() as conn:
+                    for stmt in TENANT_SCHEMA.strip().split(';'):
+                        stmt = stmt.strip()
+                        if stmt:
+                            conn.execute(text(stmt))
+                    conn.commit()
+            except Exception as e:
+                print(f'[migration] فشل تحديث قاعدة بيانات {t.slug}: {e}')
 
 if __name__ == '__main__':
     init_app()
