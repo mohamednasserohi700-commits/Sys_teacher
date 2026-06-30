@@ -913,7 +913,7 @@ def developer_login():
         if u == DEVELOPER_USERNAME and p == DEVELOPER_PASSWORD:
             session.clear()
             session['is_developer'] = True
-            session['dev_name']     = 'حسام'
+            session['dev_name']     = 'محمد ناصر'
             return redirect(url_for('developer_dashboard'))
         error = 'بيانات الدخول غير صحيحة'
     return render_template('developer_login.html', error=error)
@@ -990,7 +990,7 @@ def developer_enter(slug):
     if not tenant:
         return render_template('404.html'), 404
     session['user_id']     = 0
-    session['user_name']   = 'حسام (مطور النظام)'
+    session['user_name']   = 'محمد ناصر (مطور النظام)'
     session['user_role']   = 'admin'
     session['tenant_slug'] = slug
     session['is_developer']= True
