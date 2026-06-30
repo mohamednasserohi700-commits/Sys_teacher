@@ -11,6 +11,61 @@
 
 <div style="display:grid;gap:24px;max-width:900px">
 
+  <!-- ── Subscription ── -->
+  <div class="card" id="subscription">
+    <div class="card-header">
+      <div class="card-title">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-left:6px"><path d="M13 2L3 14h7l-1 8 11-13h-7l1-7z"/></svg>
+        الاشتراك والباقة
+      </div>
+    </div>
+    <div class="card-body">
+      {% if is_subscribed %}
+      <div style="display:flex;align-items:center;gap:10px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);padding:14px 18px;border-radius:8px;margin-bottom:18px">
+        <span style="width:9px;height:9px;border-radius:50%;background:#22c55e;display:inline-block"></span>
+        <div>
+          <div style="font-weight:700;color:#16a34a;font-size:13.5px">باقة مدفوعة مفعّلة</div>
+          <div style="font-size:12px;color:var(--fiori-text-secondary);margin-top:2px">سارية حتى {{ subscription_until.strftime('%Y/%m/%d') }} — بدون حد أقصى للمستخدمين أو الطلاب</div>
+        </div>
+      </div>
+      {% else %}
+      <div style="display:flex;align-items:center;gap:10px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);padding:14px 18px;border-radius:8px;margin-bottom:18px">
+        <span style="width:9px;height:9px;border-radius:50%;background:#f59e0b;display:inline-block"></span>
+        <div>
+          <div style="font-weight:700;color:#d97706;font-size:13.5px">الباقة المجانية</div>
+          <div style="font-size:12px;color:var(--fiori-text-secondary);margin-top:2px">
+            المستخدمون: {{ users_count }} / {{ free_max_users }} &nbsp;|&nbsp; الطلاب: {{ students_count }} / {{ free_max_students }}
+          </div>
+        </div>
+      </div>
+
+      <div class="form-row cols-2" style="margin-bottom:18px">
+        {% for plan in subscription_plans %}
+        <a href="https://wa.me/2{{ whatsapp_number }}?text={{ ('عايز أشترك في باقة ' ~ plan.label ~ ' بسعر ' ~ plan.price ~ ' جنيه') | urlencode }}"
+           target="_blank" rel="noopener"
+           style="display:block;text-decoration:none;border:1px solid var(--fiori-border);border-radius:10px;padding:16px;background:var(--fiori-bg)">
+          <div style="font-size:14px;font-weight:700;color:var(--fiori-text)">{{ plan.label }}</div>
+          <div style="font-size:20px;font-weight:800;color:#16a34a;margin:6px 0">{{ plan.price }} ج.م</div>
+          <div style="font-size:12px;color:var(--fiori-text-secondary);display:flex;align-items:center;gap:6px">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.6 6.3A8 8 0 003.9 16l-1 4 4.1-1a8 8 0 0010.6-12.7zm-5.6 13a6.7 6.7 0 01-3.4-.9l-.2-.1-2.5.6.6-2.4-.2-.3a6.7 6.7 0 1110 1l-4.3 1.1z"/></svg>
+            تواصل عبر واتساب
+          </div>
+        </a>
+        {% endfor %}
+      </div>
+
+      <form method="POST" action="/org/{{ slug }}/settings" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap">
+        <input type="hidden" name="form_type" value="activate_subscription">
+        <div class="form-group" style="flex:1;min-width:200px;margin-bottom:0">
+          <label class="form-label">عندك كود تفعيل؟ اكتبه هنا</label>
+          <input type="text" name="activation_code" class="form-control" placeholder="مثال: A1B2C3D4" style="text-transform:uppercase">
+        </div>
+        <button type="submit" class="btn btn-primary" style="height:42px">تفعيل الاشتراك</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+
   <!-- ── General Settings ── -->
   <div class="card">
     <div class="card-header">

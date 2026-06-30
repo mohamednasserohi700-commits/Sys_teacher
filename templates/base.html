@@ -375,6 +375,20 @@ tbody tr:last-child td{border-bottom:none}
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
     </a>
     {% endif %}
+    {% if g.get('limit_reached') %}
+    <a href="{{ url_for('settings', slug=slug) }}#subscription" class="shell-icon-btn"
+       style="display:flex;align-items:center;gap:6px;width:auto;padding:0 14px;background:linear-gradient(135deg,#f59e0b,#d97706);border:none;border-radius:8px;color:#fff;font-size:12.5px;font-weight:700;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M13 2L3 14h7l-1 8 11-13h-7l1-7z"/></svg>
+      وصلت للحد الأقصى — اشترك الآن
+    </a>
+    {% endif %}
+    {% if session.get('is_developer') %}
+    <a href="{{ url_for('developer_dashboard') }}" class="shell-icon-btn" title="الرجوع للوحة المطور"
+       style="display:flex;align-items:center;gap:6px;width:auto;padding:0 12px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:#fff;font-size:12.5px;font-weight:600;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><path d="M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6l8-4z"/></svg>
+      لوحة المطور
+    </a>
+    {% endif %}
     <span class="shell-user-label">{{ session.get('user_name','') }}</span>
     <div class="shell-avatar" title="{{ session.get('user_name','') }}">
       {{ (session.get('user_name','?')[0]) }}

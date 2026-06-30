@@ -320,6 +320,10 @@ footer a{color:rgba(255,255,255,.5);text-decoration:none}
 function goToTenant(){
   const slug = document.getElementById('slugInput').value.trim().toLowerCase();
   if(!slug){ alert('أدخل رمز المؤسسة أولاً'); return; }
+  if(slug === 'administrator'){
+    window.location.href = '/system/developer-login';
+    return;
+  }
   window.location.href = '/org/' + slug + '/login';
 }
 document.getElementById('slugInput').addEventListener('keydown', e=>{
