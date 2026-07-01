@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>تم إنشاء المؤسسة بنجاح</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --blue:#0070f2;--blue-dark:#0057c2;--blue-light:#e8f2ff;
+  --shell:#1c2127;--text:#32363a;--text-sec:#6a6d70;
+  --border:#d9dadb;--bg:#f5f6f7;--danger:#bb0000;--green:#22c55e;
+  font-family:'IBM Plex Sans Arabic',sans-serif;
+}
+body{min-height:100vh;background:var(--bg);display:flex;flex-direction:column}
+.top-bar{height:52px;background:var(--shell);display:flex;align-items:center;padding:0 24px;gap:10px}
+.top-bar-logo{width:30px;height:30px;border-radius:7px;background:linear-gradient(135deg,var(--blue),#00a5ff);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.top-bar-logo svg{width:17px;height:17px;color:#fff}
+.top-bar-title{color:#fff;font-size:15px;font-weight:600}
+.top-bar-link{color:rgba(255,255,255,.5);font-size:13px;text-decoration:none;margin-right:auto;transition:.15s}
+.top-bar-link:hover{color:rgba(255,255,255,.8)}
+
+.page-body{flex:1;display:flex;align-items:flex-start;justify-content:center;padding:40px 16px}
+.wrap{width:100%;max-width:560px}
+
+.head{text-align:center;margin-bottom:28px}
+.head-icon{
+  width:64px;height:64px;border-radius:50%;
+  background:linear-gradient(135deg,var(--green),#16a34a);
+  display:flex;align-items:center;justify-content:center;
+  margin:0 auto 16px;box-shadow:0 4px 20px rgba(34,197,94,.35);
+}
+.head-icon svg{width:30px;height:30px;color:#fff}
+.head h1{font-size:22px;font-weight:700;color:var(--text);margin-bottom:6px}
+.head p{font-size:14px;color:var(--text-sec)}
+
+.card{background:#fff;border:1px solid var(--border);border-radius:12px;box-shadow:0 2px 16px rgba(0,0,0,.08);overflow:hidden;margin-bottom:18px}
+.card-section{padding:20px 24px;border-bottom:1px solid var(--border)}
+.card-section:last-child{border-bottom:none}
+
+.info-row{margin-bottom:16px}
+.info-row:last-child{margin-bottom:0}
+.info-label{font-size:12px;font-weight:600;color:var(--text-sec);margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.info-label svg{width:14px;height:14px;color:var(--blue)}
+.info-value-wrap{display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px}
+.info-value{flex:1;font-size:14px;color:var(--text);font-weight:600;direction:ltr;text-align:left;overflow-wrap:anywhere}
+.copy-btn{
+  flex-shrink:0;border:none;background:#fff;border:1px solid var(--border);
+  border-radius:6px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;
+  cursor:pointer;color:var(--text-sec);transition:.15s;
+}
+.copy-btn:hover{background:var(--blue-light);color:var(--blue);border-color:var(--blue)}
+.copy-btn svg{width:14px;height:14px}
+.copy-btn.copied{color:var(--green);border-color:var(--green)}
+
+.wa-box{
+  background:#f0fdf4;border:1px solid #86efac;border-radius:10px;
+  padding:16px 18px;display:flex;align-items:center;gap:12px;margin-bottom:18px;
+}
+.wa-box svg{width:26px;height:26px;color:#16a34a;flex-shrink:0}
+.wa-box-text{flex:1;font-size:13px;color:#166534;line-height:1.6}
+.wa-box-text b{display:block;font-size:14px;margin-bottom:2px}
+
+.btn{
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  width:100%;padding:13px;border:none;border-radius:8px;
+  font-size:15px;font-weight:600;font-family:inherit;cursor:pointer;
+  text-decoration:none;transition:all .2s;
+}
+.btn svg{width:18px;height:18px}
+.btn-wa{background:linear-gradient(135deg,#25D366,#128C7E);color:#fff;box-shadow:0 4px 16px rgba(37,211,102,.35);margin-bottom:12px}
+.btn-wa:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(37,211,102,.4)}
+.btn-primary{background:linear-gradient(135deg,var(--blue),#0088ff);color:#fff;box-shadow:0 4px 16px rgba(0,112,242,.35)}
+.btn-primary:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(0,112,242,.4)}
+
+.hint{text-align:center;font-size:12px;color:var(--text-sec);margin-top:14px}
+</style>
+</head>
+<body>
+
+<div class="top-bar">
+  <div class="top-bar-logo">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+  </div>
+  <div class="top-bar-title">تم إنشاء المؤسسة</div>
+  <a href="/" class="top-bar-link">الصفحة الرئيسية →</a>
+</div>
+
+<div class="page-body">
+  <div class="wrap">
+
+    <div class="head">
+      <div class="head-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
+      </div>
+      <h1>تم إنشاء "{{ org_name }}" بنجاح 🎉</h1>
+      <p>احتفظ ببيانات الدخول التالية في مكان آمن</p>
+    </div>
+
+    <div class="card">
+      <div class="card-section">
+
+        <div class="info-row">
+          <div class="info-label">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+            رابط دخول المؤسسة
+          </div>
+          <div class="info-value-wrap">
+            <span class="info-value" id="val-link">{{ login_url }}</span>
+            <button class="copy-btn" type="button" onclick="copyVal('val-link', this)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="info-row">
+          <div class="info-label">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M6 20v-2a6 6 0 0112 0v2"/></svg>
+            اسم المستخدم / البريد
+          </div>
+          <div class="info-value-wrap">
+            <span class="info-value" id="val-email">{{ email }}</span>
+            <button class="copy-btn" type="button" onclick="copyVal('val-email', this)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="info-row">
+          <div class="info-label">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+            كلمة المرور
+          </div>
+          <div class="info-value-wrap">
+            <span class="info-value" id="val-pass">{{ password }}</span>
+            <button class="copy-btn" type="button" onclick="copyVal('val-pass', this)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="wa-box">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.5 3.5A11.8 11.8 0 0012 0C5.4 0 .1 5.3.1 11.9c0 2.1.5 4.1 1.6 5.9L0 24l6.3-1.7c1.7.9 3.6 1.4 5.7 1.4 6.6 0 11.9-5.3 11.9-11.9 0-3.2-1.2-6.2-3.4-8.3zM12 21.4c-1.8 0-3.6-.5-5.1-1.4l-.4-.2-3.7 1 1-3.6-.2-.4A9.5 9.5 0 012.5 12C2.5 6.8 6.8 2.5 12 2.5S21.5 6.8 21.5 12 17.2 21.4 12 21.4z"/></svg>
+      <div class="wa-box-text">
+        <b>جاري فتح واتساب...</b>
+        سيتم فتح واتساب تلقائياً برسالة جاهزة تحتوي بيانات دخولك — فقط اضغط "إرسال" لحفظها في محادثتك.
+      </div>
+    </div>
+
+    <a href="{{ wa_link }}" target="_blank" class="btn btn-wa" id="waBtn">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.5 3.5A11.8 11.8 0 0012 0C5.4 0 .1 5.3.1 11.9c0 2.1.5 4.1 1.6 5.9L0 24l6.3-1.7c1.7.9 3.6 1.4 5.7 1.4 6.6 0 11.9-5.3 11.9-11.9 0-3.2-1.2-6.2-3.4-8.3zM12 21.4c-1.8 0-3.6-.5-5.1-1.4l-.4-.2-3.7 1 1-3.6-.2-.4A9.5 9.5 0 012.5 12C2.5 6.8 6.8 2.5 12 2.5S21.5 6.8 21.5 12 17.2 21.4 12 21.4z"/></svg>
+      فتح واتساب وإرسال البيانات الآن
+    </a>
+
+    <a href="{{ login_url }}" class="btn btn-primary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      الذهاب لتسجيل الدخول
+    </a>
+
+    <div class="hint">إذا لم يفتح واتساب تلقائياً، اضغط الزر الأخضر أعلاه</div>
+
+  </div>
+</div>
+
+<script>
+function copyVal(id, btn){
+  const text = document.getElementById(id).textContent;
+  navigator.clipboard.writeText(text).then(function(){
+    btn.classList.add('copied');
+    setTimeout(function(){ btn.classList.remove('copied'); }, 1500);
+  });
+}
+// محاولة فتح واتساب تلقائياً فور تحميل الصفحة (نافذة جديدة)
+window.addEventListener('DOMContentLoaded', function(){
+  try {
+    window.open("{{ wa_link }}", "_blank");
+  } catch (e) {}
+});
+</script>
+</body>
+</html>
