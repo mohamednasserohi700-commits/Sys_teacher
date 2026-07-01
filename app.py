@@ -354,8 +354,29 @@ def register():
             main_db.session.add(tenant)
             main_db.session.commit()
             create_tenant_db(slug, org_name, owner, email, password)
-            flash(f'تم إنشاء مؤسستك بنجاح! | بريدك: {email} | رابط الدخول: /org/{slug}/login', 'success')
-            return redirect(url_for('tenant_login', slug=slug))
+
+            # رابط الدخول الكامل للمؤسسة
+            login_url = url_for('tenant_login', slug=slug, _external=True)
+
+            # تجهيز رسالة واتساب تُرسل تلقائياً لصاحب المؤسسة (نفس رقمه المسجل)
+            wa_msg = (
+                "🎉 *تم إنشاء مؤسستك بنجاح!*\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                f"🏫 المؤسسة: *{org_name}*\n"
+                f"🔗 رابط الدخول:\n{login_url}\n"
+                f"👤 اسم المستخدم: {email}\n"
+                f"🔑 كلمة المرور: {password}\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "احتفظ بهذه البيانات في مكان آمن"
+            )
+            wa_phone = owner_phone
+            if wa_phone.startswith('0'): wa_phone = '966' + wa_phone[1:]
+            if not wa_phone.startswith('966'): wa_phone = '966' + wa_phone
+            wa_link = f"https://wa.me/{wa_phone}?text={urllib.parse.quote(wa_msg)}"
+
+            return render_template('register_success.html',
+                                    org_name=org_name, slug=slug, login_url=login_url,
+                                    email=email, password=password, wa_link=wa_link)
     return render_template('register.html', error=error)
 
 # ══════════════════════════════════════════════════════════════
