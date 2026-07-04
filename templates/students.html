@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}قائمة الطلاب{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <div>
+    <div class="page-title">قائمة الطلاب</div>
+    <div class="page-subtitle">إجمالي {{ students|length }} طالب</div>
+  </div>
+  <div class="page-actions">
+    <a href="/org/{{ slug }}/students/add" class="btn btn-primary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      إضافة طالب
+    </a>
+  </div>
+</div>
+
+<!-- Filters -->
+<div class="search-filter-bar">
+  <input type="text" class="form-control" id="searchInput" placeholder="🔍  بحث بالاسم..." value="{{ search }}">
+  <select class="form-control" id="gradeSelect" style="max-width:180px">
+    <option value="">كل الصفوف</option>
+    {% for g in grades %}
+    <option value="{{ g }}" {% if g==grade_filter %}selected{% endif %}>{{ g }}</option>
+    {% endfor %}
+  </select>
+  <button class="btn btn-secondary" onclick="applyFilters()">تطبيق</button>
+  {% if search or grade_filter %}
+  <a href="/org/{{ slug }}/students" class="btn btn-ghost">إعادة تعيين</a>
+  {% endif %}
+</div>
+
+<div class="card">
+  {% if students %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>اسم الطالب</th>
+          <th>الصف</th>
+          <th>ولي الأمر</th>
+          <th>رقم الجوال</th>
+          <th>تاريخ التسجيل</th>
+          <th>إجراءات</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in students %}
+        <tr>
+          <td style="color:var(--fiori-text-secondary);font-size:12px">{{ loop.index }}</td>
+          <td>
+            <div style="display:flex;align-items:center;gap:10px">
+              <div style="width:34px;height:34px;border-radius:50%;background:var(--fiori-blue-light);color:var(--fiori-blue);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0">
+                {{ s.name[0] }}
+              </div>
+              <span style="font-weight:500">{{ s.name }}</span>
+            </div>
+          </td>
+          <td><span class="badge badge-info">{{ s.grade }}</span></td>
+          <td>{{ s.parent_name or '—' }}</td>
+          <td>
+            {% if s.parent_phone %}
+            <a href="tel:{{ s.parent_phone }}" style="color:var(--fiori-blue);text-decoration:none;font-size:13px">{{ s.parent_phone }}</a>
+            {% else %}—{% endif %}
+          </td>
+          <td style="color:var(--fiori-text-secondary);font-size:13px">{{ s.created_at | format_date('%Y/%m/%d') }}</td>
+          <td>
+            <div style="display:flex;gap:4px;flex-wrap:wrap">
+              <a href="/org/{{ slug }}/students/edit/{{ s.id }}" class="btn btn-secondary btn-sm" title="تعديل">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                تعديل
+              </a>
+              <a href="/org/{{ slug }}/reports?grade={{ s.grade }}" class="btn btn-ghost btn-sm" title="التقرير">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              </a>
+              <form method="POST" action="/org/{{ slug }}/students/delete/{{ s.id }}" style="display:inline" onsubmit="return confirm('هل أنت متأكد من حذف الطالب؟')">
+                <button type="submit" class="btn btn-danger btn-sm" title="حذف">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+                </button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+    <p>لا يوجد طلاب {% if search or grade_filter %}بهذا الفلتر{% else %}مسجلون بعد{% endif %}</p>
+    {% if not search and not grade_filter %}
+    <a href="/org/{{ slug }}/students/add" class="btn btn-primary" style="margin-top:16px">إضافة أول طالب</a>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+function applyFilters(){
+  const s = document.getElementById('searchInput').value;
+  const g = document.getElementById('gradeSelect').value;
+  window.location = '/org/{{ slug }}/students?search='+encodeURIComponent(s)+'&grade='+encodeURIComponent(g);
+}
+document.getElementById('searchInput').addEventListener('keydown', e => { if(e.key==='Enter') applyFilters(); });
+</script>
+{% endblock %}
