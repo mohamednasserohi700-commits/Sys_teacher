@@ -822,16 +822,30 @@ def attendance_scan_mark(slug):
     student = t_fetchone("SELECT * FROM students WHERE barcode=:b", {'b': code})
     if not student:
         return jsonify({'success': False, 'message': 'لا يوجد طالب بهذا الباركود'}), 404
+
+    try:
+        att_dt = datetime.strptime(att_date, '%Y-%m-%d').date()
+    except Exception:
+        att_dt = date.today()
+    day_name = ARABIC_DAYS[att_dt.weekday()]
+    scheduled_days = json.loads(student.get('attendance_days') or '[]')
+    if scheduled_days and day_name not in scheduled_days:
+        return jsonify({
+            'success': False,
+            'message': f"لم يتم تسجيل الحضور: {student['name']} غير مسجل ضمن أيام حضوره اليوم ({day_name})",
+            'student_name': student['name']
+        }), 200
+
     existing = t_fetchone(
         "SELECT id FROM attendance WHERE student_id=:s AND date=:d",
         {'s': student['id'], 'd': att_date}
     )
     if existing:
-        t_execute("UPDATE attendance SET status='حاضر' WHERE id=:id", {'id': existing['id']})
+        t_execute("UPDATE attendance SET status='present' WHERE id=:id", {'id': existing['id']})
     else:
         t_execute(
             "INSERT INTO attendance (student_id,date,status,note,created_at) "
-            "VALUES (:s,:d,'حاضر','',:ca)",
+            "VALUES (:s,:d,'present','',:ca)",
             {'s': student['id'], 'd': att_date, 'ca': datetime.utcnow().isoformat()}
         )
     return jsonify({'success': True, 'message': f"تم تسجيل حضور: {student['name']}",
