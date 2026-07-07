@@ -13,6 +13,8 @@ from sqlalchemy.orm import scoped_session, sessionmaker, declarative_base
 from datetime import datetime, date, timedelta
 from functools import wraps
 import json, urllib.parse, os, io, zipfile, re, secrets
+import barcode as barcode_lib
+from barcode.writer import SVGWriter
 
 # قراءة ملف .env تلقائياً (لو موجود بجانب app.py) لتسهيل التشغيل المحلي،
 # بحيث لا يحتاج المطوّر لتعيين DATABASE_URL يدوياً في كل مرة.
@@ -193,6 +195,8 @@ CREATE TABLE IF NOT EXISTS students (
     parent_name     TEXT DEFAULT '',
     parent_phone    TEXT DEFAULT '',
     attendance_days TEXT DEFAULT '[]',
+    group_id        INTEGER,
+    barcode         TEXT,
     created_at      TEXT
 );
 CREATE TABLE IF NOT EXISTS attendance (
@@ -203,7 +207,42 @@ CREATE TABLE IF NOT EXISTS attendance (
     note       TEXT DEFAULT '',
     created_at TEXT
 );
+CREATE TABLE IF NOT EXISTS groups (
+    id         SERIAL PRIMARY KEY,
+    name       TEXT NOT NULL,
+    notes      TEXT DEFAULT '',
+    created_at TEXT
+);
+CREATE TABLE IF NOT EXISTS group_subjects (
+    id           SERIAL PRIMARY KEY,
+    group_id     INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    subject_name TEXT NOT NULL,
+    teacher_name TEXT DEFAULT '',
+    schedule     TEXT DEFAULT '',
+    created_at   TEXT
+);
 """
+
+
+def make_student_barcode(slug, student_id):
+    """يولّد قيمة باركود فريدة للطالب: بادئة من اسم المؤسسة + رقم الطالب.
+    مثال: JEDDAH-000042"""
+    prefix = re.sub(r'[^A-Za-z0-9]', '', (slug or 'STU').upper())[:10] or 'STU'
+    return f'{prefix}{int(student_id):06d}'
+
+
+def _migrate_tenant_columns(conn, slug=''):
+    """ترقية أعمدة جداول المؤسسة بأمان لمن أنشأ حسابه قبل إضافة ميزتي
+    المجاميع والباركود (IF NOT EXISTS تمنع أي تكرار للأخطاء)."""
+    conn.execute(text('ALTER TABLE students ADD COLUMN IF NOT EXISTS group_id INTEGER'))
+    conn.execute(text('ALTER TABLE students ADD COLUMN IF NOT EXISTS barcode TEXT'))
+    # توليد باركود تلقائي لأي طالب قديم بدون باركود
+    missing = conn.execute(text(
+        "SELECT id FROM students WHERE barcode IS NULL OR barcode=''"
+    )).fetchall()
+    for row in missing:
+        conn.execute(text("UPDATE students SET barcode=:b WHERE id=:id"),
+                     {'b': make_student_barcode(slug, row[0]), 'id': row[0]})
 
 
 def create_tenant_schema_and_tables(slug):
@@ -216,6 +255,7 @@ def create_tenant_schema_and_tables(slug):
             stmt = stmt.strip()
             if stmt:
                 conn.execute(text(stmt))
+        _migrate_tenant_columns(conn, slug)
 
 
 def create_tenant_db(slug, org_name, owner_name, owner_email, owner_password):
@@ -229,6 +269,7 @@ def create_tenant_db(slug, org_name, owner_name, owner_email, owner_password):
             stmt = stmt.strip()
             if stmt:
                 conn.execute(text(stmt))
+        _migrate_tenant_columns(conn, slug)
         # المدير الأول
         conn.execute(text(
             "INSERT INTO users (username,password,name,role,permissions,is_active) "
@@ -496,11 +537,12 @@ def dashboard(slug):
 def students(slug):
     gf     = request.args.get('grade','')
     search = request.args.get('search','')
-    sql    = "SELECT * FROM students WHERE 1=1"
+    sql    = ("SELECT s.*, g.name AS group_name FROM students s "
+              "LEFT JOIN groups g ON g.id = s.group_id WHERE 1=1")
     params = {}
-    if gf:     sql += " AND grade=:g";       params['g'] = gf
-    if search: sql += " AND name ILIKE :s";  params['s'] = f'%{search}%'
-    sql += " ORDER BY name"
+    if gf:     sql += " AND s.grade=:g";       params['g'] = gf
+    if search: sql += " AND s.name ILIKE :s";  params['s'] = f'%{search}%'
+    sql += " ORDER BY s.name"
     students_list = t_fetchall(sql, params)
     grades = [r['grade'] for r in t_fetchall("SELECT DISTINCT grade FROM students ORDER BY grade")]
     return render_template('students.html', slug=slug, students=students_list,
@@ -517,19 +559,24 @@ def add_student(slug):
             return redirect(url_for('settings', slug=slug))
     if request.method == 'POST':
         days = json.dumps(request.form.getlist('attendance_days'), ensure_ascii=False)
-        t_execute(
-            "INSERT INTO students (name,grade,semester,student_phone,parent_name,parent_phone,attendance_days,created_at) "
-            "VALUES (:n,:g,:se,:sp,:pn,:pp,:ad,:ca)",
+        gid  = request.form.get('group_id') or None
+        new_id = t_insert_returning_id(
+            "INSERT INTO students (name,grade,semester,student_phone,parent_name,parent_phone,attendance_days,group_id,created_at) "
+            "VALUES (:n,:g,:se,:sp,:pn,:pp,:ad,:gid,:ca)",
             {'n':request.form['name'].strip(),'g':request.form['grade'].strip(),
              'se':request.form.get('semester','الأول').strip(),
              'sp':request.form.get('student_phone','').strip(),
              'pn':request.form.get('parent_name','').strip(),
              'pp':request.form.get('parent_phone','').strip(),
-             'ad':days, 'ca':datetime.utcnow().isoformat()}
+             'ad':days, 'gid': gid, 'ca':datetime.utcnow().isoformat()}
         )
+        t_execute("UPDATE students SET barcode=:b WHERE id=:id",
+                  {'b': make_student_barcode(slug, new_id), 'id': new_id})
         flash('تم إضافة الطالب بنجاح', 'success')
         return redirect(url_for('students', slug=slug))
-    return render_template('student_form.html', slug=slug, student=None, action='add', all_days=ALL_DAYS_ORDER)
+    groups_list = t_fetchall("SELECT * FROM groups ORDER BY name")
+    return render_template('student_form.html', slug=slug, student=None, action='add',
+                           all_days=ALL_DAYS_ORDER, groups_list=groups_list)
 
 @app.route('/org/<slug>/students/edit/<int:sid>', methods=['GET','POST'])
 @load_tenant
@@ -539,20 +586,27 @@ def edit_student(slug, sid):
     if not student: return redirect(url_for('students', slug=slug))
     if request.method == 'POST':
         days = json.dumps(request.form.getlist('attendance_days'), ensure_ascii=False)
+        gid  = request.form.get('group_id') or None
         t_execute(
             "UPDATE students SET name=:n,grade=:g,semester=:se,student_phone=:sp,"
-            "parent_name=:pn,parent_phone=:pp,attendance_days=:ad WHERE id=:id",
+            "parent_name=:pn,parent_phone=:pp,attendance_days=:ad,group_id=:gid WHERE id=:id",
             {'n':request.form['name'].strip(),'g':request.form['grade'].strip(),
              'se':request.form.get('semester','الأول').strip(),
              'sp':request.form.get('student_phone','').strip(),
              'pn':request.form.get('parent_name','').strip(),
              'pp':request.form.get('parent_phone','').strip(),
-             'ad':days,'id':sid}
+             'ad':days,'gid': gid, 'id':sid}
         )
         flash('تم تعديل بيانات الطالب', 'success')
         return redirect(url_for('students', slug=slug))
+    if not student.get('barcode'):
+        t_execute("UPDATE students SET barcode=:b WHERE id=:id",
+                  {'b': make_student_barcode(slug, sid), 'id': sid})
+        student['barcode'] = make_student_barcode(slug, sid)
     student['attendance_days_list'] = json.loads(student.get('attendance_days') or '[]')
-    return render_template('student_form.html', slug=slug, student=student, action='edit', all_days=ALL_DAYS_ORDER)
+    groups_list = t_fetchall("SELECT * FROM groups ORDER BY name")
+    return render_template('student_form.html', slug=slug, student=student, action='edit',
+                           all_days=ALL_DAYS_ORDER, groups_list=groups_list)
 
 @app.route('/org/<slug>/students/delete/<int:sid>', methods=['POST'])
 @load_tenant
@@ -562,6 +616,130 @@ def delete_student(slug, sid):
     t_execute("DELETE FROM students WHERE id=:id", {'id':sid})
     flash('تم حذف الطالب', 'warning')
     return redirect(url_for('students', slug=slug))
+
+# ─── الباركود وبطاقة الطالب ─────────────────────────────────────
+
+@app.route('/org/<slug>/students/<int:sid>/barcode.svg')
+@load_tenant
+@login_required
+def student_barcode_svg(slug, sid):
+    student = t_fetchone("SELECT * FROM students WHERE id=:id", {'id': sid})
+    if not student:
+        return '', 404
+    code = student.get('barcode')
+    if not code:
+        code = make_student_barcode(slug, sid)
+        t_execute("UPDATE students SET barcode=:b WHERE id=:id", {'b': code, 'id': sid})
+    buf = io.BytesIO()
+    code128 = barcode_lib.get_barcode_class('code128')
+    writer  = SVGWriter()
+    code128(code, writer=writer).write(buf, options={
+        'write_text': True, 'module_height': 12, 'quiet_zone': 2, 'font_size': 9
+    })
+    buf.seek(0)
+    return send_file(buf, mimetype='image/svg+xml')
+
+@app.route('/org/<slug>/students/<int:sid>/id_card')
+@load_tenant
+@login_required
+def student_id_card(slug, sid):
+    student = t_fetchone(
+        "SELECT s.*, g.name AS group_name FROM students s "
+        "LEFT JOIN groups g ON g.id = s.group_id WHERE s.id=:id", {'id': sid}
+    )
+    if not student:
+        return redirect(url_for('students', slug=slug))
+    if not student.get('barcode'):
+        code = make_student_barcode(slug, sid)
+        t_execute("UPDATE students SET barcode=:b WHERE id=:id", {'b': code, 'id': sid})
+        student['barcode'] = code
+    return render_template('id_card.html', slug=slug, student=student)
+
+# ─── المجاميع (المواد / المعلمين / المواعيد) ────────────────────
+
+@app.route('/org/<slug>/groups')
+@load_tenant
+@login_required
+def groups(slug):
+    groups_list = t_fetchall("SELECT * FROM groups ORDER BY name")
+    for grp in groups_list:
+        grp['subjects'] = t_fetchall(
+            "SELECT * FROM group_subjects WHERE group_id=:g ORDER BY id", {'g': grp['id']})
+        grp['students_count'] = t_fetchone(
+            "SELECT COUNT(*) AS c FROM students WHERE group_id=:g", {'g': grp['id']})['c']
+    return render_template('groups.html', slug=slug, groups=groups_list)
+
+@app.route('/org/<slug>/groups/add', methods=['POST'])
+@load_tenant
+@login_required
+def add_group(slug):
+    name = request.form.get('name','').strip()
+    if name:
+        t_execute(
+            "INSERT INTO groups (name,notes,created_at) VALUES (:n,:no,:ca)",
+            {'n': name, 'no': request.form.get('notes','').strip(),
+             'ca': datetime.utcnow().isoformat()}
+        )
+        flash('تم إضافة المجموعة', 'success')
+    return redirect(url_for('groups', slug=slug))
+
+@app.route('/org/<slug>/groups/edit/<int:gid>', methods=['POST'])
+@load_tenant
+@login_required
+def edit_group(slug, gid):
+    name = request.form.get('name','').strip()
+    if name:
+        t_execute("UPDATE groups SET name=:n, notes=:no WHERE id=:id",
+                  {'n': name, 'no': request.form.get('notes','').strip(), 'id': gid})
+        flash('تم تعديل المجموعة', 'success')
+    return redirect(url_for('groups', slug=slug))
+
+@app.route('/org/<slug>/groups/delete/<int:gid>', methods=['POST'])
+@load_tenant
+@login_required
+def delete_group(slug, gid):
+    t_execute("UPDATE students SET group_id=NULL WHERE group_id=:g", {'g': gid})
+    t_execute("DELETE FROM groups WHERE id=:id", {'id': gid})
+    flash('تم حذف المجموعة', 'warning')
+    return redirect(url_for('groups', slug=slug))
+
+@app.route('/org/<slug>/groups/<int:gid>/subjects/add', methods=['POST'])
+@load_tenant
+@login_required
+def add_group_subject(slug, gid):
+    subject = request.form.get('subject_name','').strip()
+    if subject:
+        t_execute(
+            "INSERT INTO group_subjects (group_id,subject_name,teacher_name,schedule,created_at) "
+            "VALUES (:g,:s,:t,:sc,:ca)",
+            {'g': gid, 's': subject, 't': request.form.get('teacher_name','').strip(),
+             'sc': request.form.get('schedule','').strip(), 'ca': datetime.utcnow().isoformat()}
+        )
+        flash('تم إضافة المادة للمجموعة', 'success')
+    return redirect(url_for('groups', slug=slug))
+
+@app.route('/org/<slug>/groups/<int:gid>/subjects/edit/<int:subid>', methods=['POST'])
+@load_tenant
+@login_required
+def edit_group_subject(slug, gid, subid):
+    subject = request.form.get('subject_name','').strip()
+    if subject:
+        t_execute(
+            "UPDATE group_subjects SET subject_name=:s, teacher_name=:t, schedule=:sc "
+            "WHERE id=:id AND group_id=:g",
+            {'s': subject, 't': request.form.get('teacher_name','').strip(),
+             'sc': request.form.get('schedule','').strip(), 'id': subid, 'g': gid}
+        )
+        flash('تم تعديل المادة', 'success')
+    return redirect(url_for('groups', slug=slug))
+
+@app.route('/org/<slug>/groups/<int:gid>/subjects/delete/<int:subid>', methods=['POST'])
+@load_tenant
+@login_required
+def delete_group_subject(slug, gid, subid):
+    t_execute("DELETE FROM group_subjects WHERE id=:id AND group_id=:g", {'id': subid, 'g': gid})
+    flash('تم حذف المادة', 'warning')
+    return redirect(url_for('groups', slug=slug))
 
 # ─── Attendance ───────────────────────────────────────────────
 
@@ -625,6 +803,39 @@ def save_attendance(slug):
                  'no':rec.get('note',''),'ca':datetime.utcnow().isoformat()}
             )
     return jsonify({'success':True,'message':'تم حفظ الحضور بنجاح'})
+
+@app.route('/org/<slug>/attendance/scan')
+@load_tenant
+@login_required
+def attendance_scan(slug):
+    return render_template('attendance_scan.html', slug=slug, today=date.today().isoformat())
+
+@app.route('/org/<slug>/attendance/scan/mark', methods=['POST'])
+@load_tenant
+@login_required
+def attendance_scan_mark(slug):
+    data    = request.get_json() or {}
+    code    = (data.get('barcode') or '').strip()
+    att_date = data.get('date') or date.today().isoformat()
+    if not code:
+        return jsonify({'success': False, 'message': 'لم يتم إرسال باركود'}), 400
+    student = t_fetchone("SELECT * FROM students WHERE barcode=:b", {'b': code})
+    if not student:
+        return jsonify({'success': False, 'message': 'لا يوجد طالب بهذا الباركود'}), 404
+    existing = t_fetchone(
+        "SELECT id FROM attendance WHERE student_id=:s AND date=:d",
+        {'s': student['id'], 'd': att_date}
+    )
+    if existing:
+        t_execute("UPDATE attendance SET status='حاضر' WHERE id=:id", {'id': existing['id']})
+    else:
+        t_execute(
+            "INSERT INTO attendance (student_id,date,status,note,created_at) "
+            "VALUES (:s,:d,'حاضر','',:ca)",
+            {'s': student['id'], 'd': att_date, 'ca': datetime.utcnow().isoformat()}
+        )
+    return jsonify({'success': True, 'message': f"تم تسجيل حضور: {student['name']}",
+                    'student_name': student['name'], 'grade': student['grade']})
 
 # ─── Reports ──────────────────────────────────────────────────
 
