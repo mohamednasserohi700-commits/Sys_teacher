@@ -39,6 +39,7 @@
           <th>#</th>
           <th>اسم الطالب</th>
           <th>الصف</th>
+          <th>المجموعة</th>
           <th>ولي الأمر</th>
           <th>رقم الجوال</th>
           <th>تاريخ التسجيل</th>
@@ -58,6 +59,7 @@
             </div>
           </td>
           <td><span class="badge badge-info">{{ s.grade }}</span></td>
+          <td>{% if s.group_name %}<span class="badge badge-info" style="background:var(--fiori-warning-bg);color:var(--fiori-warning)">{{ s.group_name }}</span>{% else %}—{% endif %}</td>
           <td>{{ s.parent_name or '—' }}</td>
           <td>
             {% if s.parent_phone %}
@@ -73,6 +75,9 @@
               </a>
               <a href="/org/{{ slug }}/reports?grade={{ s.grade }}" class="btn btn-ghost btn-sm" title="التقرير">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              </a>
+              <a href="/org/{{ slug }}/students/{{ s.id }}/id_card" target="_blank" class="btn btn-ghost btn-sm" title="بطاقة الباركود">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="6" y1="9" x2="6" y2="15"/><line x1="9" y1="9" x2="9" y2="15"/><line x1="12" y1="9" x2="12" y2="15"/><line x1="16" y1="9" x2="16" y2="15"/><line x1="19" y1="9" x2="19" y2="15"/></svg>
               </a>
               <form method="POST" action="/org/{{ slug }}/students/delete/{{ s.id }}" style="display:inline" onsubmit="return confirm('هل أنت متأكد من حذف الطالب؟')">
                 <button type="submit" class="btn btn-danger btn-sm" title="حذف">

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}تسجيل الحضور بالباركود{% endblock %}
+{% block extra_head %}
+<style>
+.scan-box{max-width:520px;margin:0 auto}
+.scan-input{
+  width:100%;padding:18px;font-size:20px;text-align:center;
+  border:2px solid var(--fiori-border);border-radius:10px;letter-spacing:.05em;
+}
+.scan-input:focus{outline:none;border-color:var(--fiori-blue);box-shadow:0 0 0 4px rgba(0,112,242,.15)}
+.scan-feedback{
+  margin-top:16px;padding:16px;border-radius:10px;text-align:center;
+  font-size:16px;font-weight:600;display:none;
+}
+.scan-feedback.ok{display:block;background:var(--fiori-success-bg);color:var(--fiori-success);border:1px solid #82c49b}
+.scan-feedback.err{display:block;background:var(--fiori-danger-bg);color:var(--fiori-danger);border:1px solid #f89090}
+.scan-log{margin-top:20px}
+.scan-log-item{
+  display:flex;justify-content:space-between;padding:10px 14px;
+  border-bottom:1px solid var(--fiori-border);font-size:13px;
+}
+</style>
+{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <div>
+    <div class="page-title">تسجيل الحضور بالباركود</div>
+    <div class="page-subtitle">وجّه القارئ نحو باركود بطاقة الطالب أو أدخل الكود يدويًا ثم اضغط Enter</div>
+  </div>
+  <a href="/org/{{ slug }}/attendance" class="btn btn-secondary">تسجيل الحضور اليدوي</a>
+</div>
+
+<div class="card">
+  <div class="card-body scan-box">
+    <label class="form-label">تاريخ اليوم: {{ today }}</label>
+    <input type="text" id="scanInput" class="scan-input" placeholder="امسح الباركود هنا…" autofocus autocomplete="off">
+    <div id="scanFeedback" class="scan-feedback"></div>
+    <div class="scan-log" id="scanLog"></div>
+  </div>
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+const input    = document.getElementById('scanInput');
+const feedback = document.getElementById('scanFeedback');
+const logBox   = document.getElementById('scanLog');
+input.focus();
+document.addEventListener('click', () => input.focus());
+
+input.addEventListener('keydown', e => {
+  if(e.key !== 'Enter') return;
+  const code = input.value.trim();
+  input.value = '';
+  if(!code) return;
+  fetch('/org/{{ slug }}/attendance/scan/mark', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({barcode: code, date: '{{ today }}'})
+  })
+  .then(r => r.json())
+  .then(data => {
+    feedback.className = 'scan-feedback ' + (data.success ? 'ok' : 'err');
+    feedback.textContent = data.message;
+    const item = document.createElement('div');
+    item.className = 'scan-log-item';
+    item.innerHTML = `<span>${data.student_name || code}</span><span style="color:${data.success ? 'var(--fiori-success)' : 'var(--fiori-danger)'}">${data.success ? '✔ حاضر' : '✘ ' + data.message}</span>`;
+    logBox.prepend(item);
+  })
+  .catch(() => {
+    feedback.className = 'scan-feedback err';
+    feedback.textContent = 'تعذر الاتصال بالخادم';
+  });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}المجاميع{% endblock %}
+{% block extra_head %}
+<style>
+.group-card{margin-bottom:20px}
+.group-card .card-header{background:var(--fiori-bg)}
+.subject-row-form{display:grid;grid-template-columns:1.3fr 1.3fr 1.4fr auto;gap:8px;margin-top:12px}
+@media(max-width:700px){.subject-row-form{grid-template-columns:1fr}}
+.inline-edit-form{display:grid;grid-template-columns:1.3fr 1.3fr 1.4fr auto auto;gap:6px;align-items:center}
+@media(max-width:700px){.inline-edit-form{grid-template-columns:1fr}}
+.add-group-box{display:grid;grid-template-columns:1fr 1fr auto;gap:10px}
+@media(max-width:700px){.add-group-box{grid-template-columns:1fr}}
+</style>
+{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <div>
+    <div class="page-title">المجاميع</div>
+    <div class="page-subtitle">أنشئ مجموعة لكل مجموعة طلاب، وأضف مادة/معلم/موعد لكل مجموعة</div>
+  </div>
+</div>
+
+<!-- إضافة مجموعة جديدة -->
+<div class="card" style="margin-bottom:24px">
+  <div class="card-header"><span class="card-title">➕ إضافة مجموعة جديدة</span></div>
+  <div class="card-body">
+    <form method="POST" action="/org/{{ slug }}/groups/add" class="add-group-box">
+      <input class="form-control" type="text" name="name" placeholder="اسم المجموعة (مثال: مجموعة 1)" required>
+      <input class="form-control" type="text" name="notes" placeholder="ملاحظات (اختياري)">
+      <button type="submit" class="btn btn-primary">إضافة المجموعة</button>
+    </form>
+  </div>
+</div>
+
+{% if groups %}
+  {% for grp in groups %}
+  <div class="card group-card">
+    <div class="card-header">
+      <div>
+        <span class="card-title">📁 {{ grp.name }}</span>
+        <span class="badge badge-info" style="margin-right:8px">{{ grp.students_count }} طالب</span>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button type="button" class="btn btn-secondary btn-sm" onclick="toggleEdit({{ grp.id }})">تعديل الاسم</button>
+        <form method="POST" action="/org/{{ slug }}/groups/delete/{{ grp.id }}" onsubmit="return confirm('حذف المجموعة سيؤدي لإزالة ربطها بالطلاب، متابعة؟')">
+          <button type="submit" class="btn btn-danger btn-sm">حذف المجموعة</button>
+        </form>
+      </div>
+    </div>
+    <div class="card-body">
+
+      <!-- تعديل اسم المجموعة (مخفي) -->
+      <form id="edit-group-{{ grp.id }}" method="POST" action="/org/{{ slug }}/groups/edit/{{ grp.id }}"
+            style="display:none;margin-bottom:16px;gap:8px" class="add-group-box">
+        <input class="form-control" type="text" name="name" value="{{ grp.name }}" required>
+        <input class="form-control" type="text" name="notes" value="{{ grp.notes or '' }}" placeholder="ملاحظات">
+        <button type="submit" class="btn btn-primary">حفظ</button>
+      </form>
+
+      {% if grp.subjects %}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>اسم المادة</th><th>المعلم</th><th>الموعد</th><th>إجراءات</th></tr>
+          </thead>
+          <tbody>
+            {% for subj in grp.subjects %}
+            <tr>
+              <td style="font-weight:500">{{ subj.subject_name }}</td>
+              <td>{{ subj.teacher_name or '—' }}</td>
+              <td>{{ subj.schedule or '—' }}</td>
+              <td>
+                <div style="display:flex;gap:4px">
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="toggleSubjEdit({{ grp.id }}, {{ subj.id }})">تعديل</button>
+                  <form method="POST" action="/org/{{ slug }}/groups/{{ grp.id }}/subjects/delete/{{ subj.id }}" onsubmit="return confirm('حذف المادة؟')">
+                    <button type="submit" class="btn btn-danger btn-sm">حذف</button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+            <tr id="edit-subj-{{ grp.id }}-{{ subj.id }}" style="display:none">
+              <td colspan="4">
+                <form method="POST" action="/org/{{ slug }}/groups/{{ grp.id }}/subjects/edit/{{ subj.id }}" class="inline-edit-form">
+                  <input class="form-control" type="text" name="subject_name" value="{{ subj.subject_name }}" required placeholder="اسم المادة">
+                  <input class="form-control" type="text" name="teacher_name" value="{{ subj.teacher_name or '' }}" placeholder="اسم المعلم">
+                  <input class="form-control" type="text" name="schedule" value="{{ subj.schedule or '' }}" placeholder="الموعد (مثال: السبت 5 مساءً)">
+                  <button type="submit" class="btn btn-primary btn-sm">حفظ</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div style="color:var(--fiori-text-secondary);font-size:13px;margin-bottom:8px">لا توجد مواد بعد في هذه المجموعة</div>
+      {% endif %}
+
+      <!-- إضافة مادة جديدة للمجموعة -->
+      <form method="POST" action="/org/{{ slug }}/groups/{{ grp.id }}/subjects/add" class="subject-row-form">
+        <input class="form-control" type="text" name="subject_name" placeholder="اسم المادة" required>
+        <input class="form-control" type="text" name="teacher_name" placeholder="اسم المعلم">
+        <input class="form-control" type="text" name="schedule" placeholder="الموعد (اليوم والوقت)">
+        <button type="submit" class="btn btn-secondary">إضافة مادة</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+{% else %}
+  <div class="card">
+    <div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      <p>لا توجد مجاميع بعد، ابدأ بإضافة أول مجموعة من الأعلى</p>
+    </div>
+  </div>
+{% endif %}
+
+{% endblock %}
+{% block scripts %}
+<script>
+function toggleEdit(gid){
+  const f = document.getElementById('edit-group-'+gid);
+  f.style.display = (f.style.display==='none') ? 'grid' : 'none';
+}
+function toggleSubjEdit(gid, subid){
+  const row = document.getElementById('edit-subj-'+gid+'-'+subid);
+  row.style.display = (row.style.display==='none') ? 'table-row' : 'none';
+}
+</script>
+{% endblock %}
